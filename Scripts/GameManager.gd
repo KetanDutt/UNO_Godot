@@ -86,8 +86,11 @@ func PlayCard(playingCard):
 	var randomRotationDirection = 1 if(randf() > 0.5) else -1
 	var randomRotationAngle = rand_range(180, 360)
 	
+	# Generate a random offset for the center card position
+	var randomOffset = Vector2(rand_range(-10, 10), rand_range(-10, 10))
+	
 	# Set up the tween to interpolate the card's position and rotation
-	tween.interpolate_property(playingCard, "position", initialPosition, CenterCards[centerCardIndex].position, 0.5, Tween.TRANS_QUAD, Tween.EASE_IN_OUT)
+	tween.interpolate_property(playingCard, "position", initialPosition, CenterCards[centerCardIndex].position+randomOffset, 0.5, Tween.TRANS_QUAD, Tween.EASE_IN_OUT)
 	tween.interpolate_property(playingCard, "rotation_degrees", initialRotation, initialRotation + randomRotationDirection * randomRotationAngle, 0.5, Tween.TRANS_QUAD, Tween.EASE_IN_OUT)
 	tween.start()
 	
