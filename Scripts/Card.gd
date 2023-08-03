@@ -1,10 +1,11 @@
 extends Sprite
 
-var id = "Deck"
+var color = "Deck"
+var number = "-1"
 
 func _ready():
 	pass
 
 func _on_TextureButton_pressed():
-	print(id)
-	pass # Replace with function body.
+	get_parent().CardClicked(self)
+	pass
