@@ -39,6 +39,8 @@ func _ready():
 func CardClicked(playingCard):
 	if(!PlayerTurn):
 		return
+	if !PlayerCards.has(playingCard):
+		return
 	
 	var centerCardIndex = CenterCards.size() - 1
 	
