@@ -8,12 +8,11 @@ const Numbers = [0,1,2,3,4,5,6,7,8,9,"Skip"]
 const CardObject = preload("res://Scenes/Card.tscn")
 const Decktexture = preload("res://Assets/Uno Game Assets/Deck.png")
 
-var tween = Tween.new()
-var CardTextures = {}
-var PlayerCards = []
-var AICards = []
-var CenterCards = []
-var PlayerTurn = false
+var CardTextures: Dictionary = {}
+var PlayerCards: Array = []
+var AICards: Array = []
+var CenterCards: Array = []
+var PlayerTurn: bool = false
 
 func _ready():
 	randomize()
@@ -46,6 +45,8 @@ func CardClicked(playingCard):
 	
 	if isValidMove(playingCard, CenterCards[centerCardIndex]):
 		PlayerCards.erase(playingCard)
+		var screenSize = get_viewport().get_visible_rect().size
+		repositionCards(PlayerCards, screenSize / 2 + Vector2(0, screenSize.y * .4))
 		PlayCard(playingCard)
 	else:
 		# Handle invalid move, e.g., show a message, play a sound, etc.
@@ -64,12 +65,14 @@ func AI_Turn():
 
 		# Remove the played card from AI's hand
 		AICards.remove(selectedCardIndex)
+		var screenSize = get_viewport().get_visible_rect().size
+		repositionCards(AICards, screenSize / 2 + Vector2(0, -screenSize.y * .4))
 	else:
 		var card = SpawnCard(true)
 		AICards.append(card)
 		var screenSize = get_viewport().get_visible_rect().size
 		repositionCards(AICards,screenSize/2 + Vector2(0,-screenSize.y*.4))
-		turn_Completed(card)
+		turn_Completed(null)
 	pass
 
 func PlayCard(playingCard):
@@ -101,6 +104,7 @@ func PlayCard(playingCard):
 	
 	# Connect a callback to remove the tween node after the animation is done
 	tween.connect("tween_completed", self, "_on_tween_completed")
+	tween.connect("tween_all_completed", tween, "queue_free")
 	
 	# Add the card to the center cards array
 	CenterCards.append(playingCard)
@@ -118,9 +122,10 @@ func turn_Completed(card):
 		return
 	
 	PlayerTurn = !PlayerTurn
-	if(card.number =="Skip"):
+	if card != null and str(card.number) == "Skip":
 		PlayerTurn = !PlayerTurn
 	if !PlayerTurn:
+		yield(get_tree().create_timer(1.0), "timeout")
 		AI_Turn()
 	pass
 
@@ -183,7 +188,7 @@ func _on_Draw_Button_pressed():
 	PlayerCards.append(card)
 	var screenSize = get_viewport().get_visible_rect().size
 	repositionCards(PlayerCards,screenSize/2 + Vector2(0,screenSize.y*.4))
-	turn_Completed(card)
+	turn_Completed(null)
 	pass # Replace with function body.
 
 
