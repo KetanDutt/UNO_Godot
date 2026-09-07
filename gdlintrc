@@ -1,0 +1,39 @@
+# gdtoolkit / gdlint configuration
+#
+# Deviations from the defaults, and why:
+#
+#   max-line-length 110
+#       Godot 3 has no multi-line call sugar and the engine's own API names are
+#       long. 110 keeps signatures on one line without encouraging sprawl.
+#
+#   private-method-call
+#       The headless suites in Tests/ drive the real GameController through its
+#       internal handlers (_on_draw_pressed, _try_play, ...). Exercising the
+#       same entry points the UI uses is the point of those tests.
+#
+#   class-definitions-order
+#       Scripts are grouped by feature - the constants, state and methods for
+#       one concern sit together - rather than by declaration kind. That reads
+#       better for the sequential build-up in the UI builders.
+#
+disable:
+  - private-method-call
+  - class-definitions-order
+  - duplicated-load
+
+max-line-length: 110
+max-file-lines: 1200
+function-arguments-number: 8
+max-public-methods: 40
+
+# Note on gdformat
+# ----------------
+# `gdformat` is deliberately NOT run over this codebase. Godot 3 GDScript has no
+# syntax for breaking a method chain, so gdformat collapses the tween builder
+# chains (`tween_property(...).set_trans(...).set_ease(...)`) onto a single line
+# and pushes them well past any sane line limit - it cannot then re-break them.
+# The result fails this very lint config.
+#
+# The source is hand-formatted to the same conventions (tabs, two blank lines
+# between top-level definitions, trailing-comma-free calls) and `gdlint` is the
+# gate that CI enforces.
