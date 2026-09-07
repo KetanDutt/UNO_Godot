@@ -11,6 +11,7 @@ var face_texture: Texture = null
 var back_texture: Texture = null
 var is_face_down: bool = false
 var playable: bool = false
+var selected: bool = false
 var interaction_enabled: bool = true
 var home_position: Vector2 = Vector2.ZERO
 
@@ -29,16 +30,17 @@ func set_card_data(card_data: Dictionary, face_down: bool, deck_texture: Texture
 	back_texture = deck_texture
 	is_face_down = face_down
 	texture = back_texture if is_face_down else face_texture
-	modulate = Color(1, 1, 1, 1)
 	playable = false
+	selected = false
 	interaction_enabled = true
+	_update_visual_state()
 
 func reveal() -> void:
 	if face_texture == null:
 		return
 	is_face_down = false
 	texture = face_texture
-	modulate = Color(1, 1, 1, 1)
+	_update_visual_state()
 
 func hide_face() -> void:
 	if back_texture == null:
@@ -58,7 +60,18 @@ func set_interaction_enabled(value: bool) -> void:
 
 func set_playable(value: bool) -> void:
 	playable = value and not is_face_down
-	if playable:
+	_update_visual_state()
+
+func set_selected(value: bool) -> void:
+	selected = value and not is_face_down
+	_update_visual_state()
+	if selected:
+		raise()
+
+func _update_visual_state() -> void:
+	if selected:
+		modulate = Color(1.25, 1.25, 0.82, 1)
+	elif playable:
 		modulate = Color(1.18, 1.18, 1.18, 1)
 	else:
 		modulate = Color(1, 1, 1, 1)

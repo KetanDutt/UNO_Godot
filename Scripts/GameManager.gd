@@ -34,6 +34,9 @@ var pending_wild_choice: bool = false
 var pending_wild_card = null
 var active_color: String = ""
 var turn_count: int = 0
+var selected_card_index: int = 0
+var game_started: bool = false
+var menu_mode: String = "main"
 
 var status_label: Label = null
 var counts_label: Label = null
@@ -42,6 +45,11 @@ var color_chip: ColorRect = null
 var pass_button: Button = null
 var draw_button: Button = null
 var color_picker: Control = null
+var menu_layer: Control = null
+var main_menu_panel: Panel = null
+var pause_menu_panel: Panel = null
+var help_menu_panel: Panel = null
+var first_color_button: Button = null
 var sfx_players: Dictionary = {}
 var sfx_streams: Dictionary = {}
 
@@ -51,7 +59,8 @@ func _ready() -> void:
 	setup_runtime_ui()
 	setup_audio()
 	get_viewport().connect("size_changed", self, "_on_viewport_size_changed")
-	start_new_game()
+	set_process_unhandled_input(true)
+	show_main_menu()
 
 func start_new_game() -> void:
 	clear_table()
@@ -64,6 +73,9 @@ func start_new_game() -> void:
 	PlayerTurn = false
 	drawn_this_turn = false
 	busy = true
+	game_started = true
+	menu_mode = ""
+	selected_card_index = 0
 	pending_wild_choice = false
 	pending_wild_card = null
 	active_color = ""
@@ -71,6 +83,8 @@ func start_new_game() -> void:
 	$ColorRect.visible = false
 	if color_picker != null:
 		color_picker.visible = false
+	if menu_layer != null:
+		menu_layer.visible = false
 
 	for _i in range(STARTING_HAND_SIZE):
 		PlayerCards.append(spawn_card_from_deck(false))
@@ -185,8 +199,10 @@ func CardClicked(playingCard) -> void:
 		return
 	if not PlayerCards.has(playingCard):
 		return
+	selected_card_index = PlayerCards.find(playingCard)
 	if isValidMove(playingCard, get_top_card()):
 		PlayerCards.erase(playingCard)
+		selected_card_index = clamp(selected_card_index, 0, max(0, PlayerCards.size() - 1))
 		drawn_this_turn = false
 		playingCard.set_interaction_enabled(false)
 		set_status("You played " + describe_card(playingCard) + ".")
@@ -435,16 +451,22 @@ func repositionCards(cards: Array, centerScreenPoint: Vector2, animated: bool = 
 	update_playable_hints()
 
 func update_playable_hints() -> void:
-	for card in PlayerCards:
+	if PlayerCards.size() > 0:
+		selected_card_index = clamp(selected_card_index, 0, PlayerCards.size() - 1)
+	for i in range(PlayerCards.size()):
+		var card = PlayerCards[i]
 		card.set_interaction_enabled(PlayerTurn and not busy and not pending_wild_choice)
 		card.set_playable(PlayerTurn and not busy and not pending_wild_choice and isValidMove(card, get_top_card()))
+		card.set_selected(PlayerTurn and not busy and not pending_wild_choice and i == selected_card_index)
 	for card in AICards:
 		card.set_interaction_enabled(false)
 		card.set_playable(false)
+		card.set_selected(false)
 	for card in CenterCards:
 		if is_instance_valid(card):
 			card.set_interaction_enabled(false)
 			card.set_playable(false)
+			card.set_selected(false)
 
 func setup_runtime_ui() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -519,6 +541,7 @@ func setup_runtime_ui() -> void:
 	color_chip.add_child(color_label)
 
 	create_color_picker()
+	create_menus()
 	hud.raise()
 	$Deck.raise()
 	$ColorRect.raise()
@@ -573,13 +596,307 @@ func create_color_picker() -> void:
 		button.margin_right = -120 + i * 105
 		button.margin_bottom = 58
 		button.modulate = get_color_value(color_name)
+		button.focus_mode = Control.FOCUS_ALL
 		button.connect("pressed", self, "_on_color_selected", [color_name])
 		color_picker.add_child(button)
+		if first_color_button == null:
+			first_color_button = button
+
+func _unhandled_input(event) -> void:
+	if not is_pressed_input(event):
+		return
+	if is_cancel_input(event):
+		if menu_mode == "help":
+			_on_Help_Back_Button_pressed()
+		elif menu_mode == "pause" or menu_mode == "":
+			toggle_pause_menu()
+		get_tree().set_input_as_handled()
+		return
+
+	if menu_mode != "" or not game_started:
+		return
+	if pending_wild_choice:
+		return
+	if is_left_input(event):
+		move_card_selection(-1)
+		get_tree().set_input_as_handled()
+	elif is_right_input(event):
+		move_card_selection(1)
+		get_tree().set_input_as_handled()
+	elif is_accept_input(event):
+		play_selected_card()
+		get_tree().set_input_as_handled()
+	elif is_draw_input(event):
+		_on_Draw_Button_pressed()
+		get_tree().set_input_as_handled()
+	elif is_pass_input(event):
+		_on_Pass_Button_pressed()
+		get_tree().set_input_as_handled()
+	elif is_restart_input(event) and $ColorRect.visible:
+		start_new_game()
+		get_tree().set_input_as_handled()
+
+func is_pressed_input(event) -> bool:
+	if event is InputEventKey:
+		return event.pressed and not event.echo
+	if event is InputEventJoypadButton:
+		return event.pressed
+	if event is InputEventJoypadMotion:
+		return abs(event.axis_value) > 0.72
+	return false
+
+func is_left_input(event) -> bool:
+	if event.is_action_pressed("ui_left"):
+		return true
+	if event is InputEventJoypadMotion:
+		return event.axis == 0 and event.axis_value < -0.72
+	return false
+
+func is_right_input(event) -> bool:
+	if event.is_action_pressed("ui_right"):
+		return true
+	if event is InputEventJoypadMotion:
+		return event.axis == 0 and event.axis_value > 0.72
+	return false
+
+func is_accept_input(event) -> bool:
+	if event.is_action_pressed("ui_accept"):
+		return true
+	if event is InputEventKey:
+		return event.scancode == KEY_SPACE
+	if event is InputEventJoypadButton:
+		return event.button_index == 0
+	return false
+
+func is_cancel_input(event) -> bool:
+	if event.is_action_pressed("ui_cancel"):
+		return true
+	if event is InputEventKey:
+		return event.scancode == KEY_ESCAPE
+	if event is InputEventJoypadButton:
+		return event.button_index == 1 or event.button_index == 11
+	return false
+
+func is_draw_input(event) -> bool:
+	if event is InputEventKey:
+		return event.scancode == KEY_D
+	if event is InputEventJoypadButton:
+		return event.button_index == 2
+	return false
+
+func is_pass_input(event) -> bool:
+	if event is InputEventKey:
+		return event.scancode == KEY_P
+	if event is InputEventJoypadButton:
+		return event.button_index == 3
+	return false
+
+func is_restart_input(event) -> bool:
+	return event is InputEventKey and event.scancode == KEY_R
+
+func move_card_selection(direction: int) -> void:
+	if not PlayerTurn or busy or PlayerCards.empty():
+		return
+	selected_card_index = int(posmod(selected_card_index + direction, PlayerCards.size()))
+	play_sfx("tick")
+	update_playable_hints()
+
+func play_selected_card() -> void:
+	if not PlayerTurn or busy or PlayerCards.empty():
+		return
+	selected_card_index = clamp(selected_card_index, 0, PlayerCards.size() - 1)
+	CardClicked(PlayerCards[selected_card_index])
+
+func create_menus() -> void:
+	menu_layer = Control.new()
+	menu_layer.name = "MenuLayer"
+	menu_layer.anchor_right = 1.0
+	menu_layer.anchor_bottom = 1.0
+	menu_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(menu_layer)
+
+	var dim = ColorRect.new()
+	dim.name = "Dim"
+	dim.anchor_right = 1.0
+	dim.anchor_bottom = 1.0
+	dim.color = Color(0.02, 0.02, 0.03, 0.82)
+	menu_layer.add_child(dim)
+
+	main_menu_panel = create_menu_panel("UNO Godot", "A polished card battle against the computer", Vector2(-260, -210), Vector2(260, 210))
+	menu_layer.add_child(main_menu_panel)
+	var start_button = create_menu_button("START GAME", 118, "_on_Start_Button_pressed")
+	main_menu_panel.add_child(start_button)
+	var how_button = create_menu_button("HOW TO PLAY", 178, "_on_HowToPlay_Button_pressed")
+	main_menu_panel.add_child(how_button)
+	var quit_button = create_menu_button("QUIT", 238, "_on_Quit_Button_pressed")
+	main_menu_panel.add_child(quit_button)
+
+	pause_menu_panel = create_menu_panel("Paused", "Use keyboard, remote, or controller to resume.", Vector2(-240, -190), Vector2(240, 190))
+	menu_layer.add_child(pause_menu_panel)
+	var resume_button = create_menu_button("RESUME", 110, "_on_Resume_Button_pressed")
+	pause_menu_panel.add_child(resume_button)
+	var restart_button = create_menu_button("RESTART", 170, "_on_Restart_Button_pressed")
+	pause_menu_panel.add_child(restart_button)
+	var pause_help_button = create_menu_button("CONTROLS", 230, "_on_HowToPlay_Button_pressed")
+	pause_menu_panel.add_child(pause_help_button)
+	var main_button = create_menu_button("MAIN MENU", 290, "_on_MainMenu_Button_pressed")
+	pause_menu_panel.add_child(main_button)
+
+	help_menu_panel = create_menu_panel("How to Play", "Match color or value. Wild cards choose a new color. Draw once, then play or pass.", Vector2(-330, -230), Vector2(330, 230))
+	menu_layer.add_child(help_menu_panel)
+	var controls = create_label(18, false)
+	controls.text = "Keyboard / Remote: Arrow keys to select cards, Enter or Space to play, D to draw, P to pass, Esc to pause or go back.\n\nController: D-pad or left stick to select, A to play, X to draw, Y to pass, B or Start to pause/back.\n\nMouse and touch are still supported. Highlighted cards are playable."
+	controls.autowrap = true
+	controls.anchor_left = 0.08
+	controls.anchor_top = 0.34
+	controls.anchor_right = 0.92
+	controls.anchor_bottom = 0.76
+	help_menu_panel.add_child(controls)
+	var back_button = create_menu_button("BACK", 350, "_on_Help_Back_Button_pressed")
+	help_menu_panel.add_child(back_button)
+
+	menu_layer.visible = false
+
+func create_menu_panel(title_text: String, subtitle_text: String, top_left: Vector2, bottom_right: Vector2) -> Panel:
+	var panel = Panel.new()
+	panel.visible = false
+	panel.anchor_left = 0.5
+	panel.anchor_top = 0.5
+	panel.anchor_right = 0.5
+	panel.anchor_bottom = 0.5
+	panel.margin_left = top_left.x
+	panel.margin_top = top_left.y
+	panel.margin_right = bottom_right.x
+	panel.margin_bottom = bottom_right.y
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.07, 0.08, 0.11, 0.96)
+	style.border_color = Color(1, 1, 1, 0.18)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(22)
+	style.content_margin_left = 28
+	style.content_margin_right = 28
+	style.content_margin_top = 24
+	style.content_margin_bottom = 24
+	panel.add_stylebox_override("panel", style)
+
+	var title = create_label(42, true)
+	title.text = title_text
+	title.anchor_left = 0.05
+	title.anchor_right = 0.95
+	title.margin_top = 28
+	title.margin_bottom = 84
+	title.align = Label.ALIGN_CENTER
+	panel.add_child(title)
+
+	var subtitle = create_label(17, false)
+	subtitle.text = subtitle_text
+	subtitle.autowrap = true
+	subtitle.anchor_left = 0.08
+	subtitle.anchor_right = 0.92
+	subtitle.margin_top = 82
+	subtitle.margin_bottom = 126
+	subtitle.align = Label.ALIGN_CENTER
+	panel.add_child(subtitle)
+	return panel
+
+func create_menu_button(text: String, y: float, method: String) -> Button:
+	var button = Button.new()
+	button.text = text
+	button.anchor_left = 0.5
+	button.anchor_right = 0.5
+	button.margin_left = -120
+	button.margin_top = y
+	button.margin_right = 120
+	button.margin_bottom = y + 44
+	button.focus_mode = Control.FOCUS_ALL
+	button.connect("pressed", self, method)
+	return button
+
+func show_main_menu() -> void:
+	clear_table()
+	DrawPile = []
+	game_started = false
+	PlayerTurn = false
+	busy = true
+	$ColorRect.visible = false
+	if color_picker != null:
+		color_picker.visible = false
+	show_menu_panel("main")
+	update_ui()
+	set_status("Select Start Game to play.")
+
+func show_menu_panel(mode: String) -> void:
+	menu_mode = mode
+	if menu_layer == null:
+		return
+	menu_layer.visible = true
+	main_menu_panel.visible = mode == "main"
+	pause_menu_panel.visible = mode == "pause"
+	help_menu_panel.visible = mode == "help"
+	menu_layer.raise()
+	var focus_target = null
+	if mode == "main":
+		focus_target = main_menu_panel.get_child(2)
+	elif mode == "pause":
+		focus_target = pause_menu_panel.get_child(2)
+	elif mode == "help":
+		focus_target = help_menu_panel.get_child(help_menu_panel.get_child_count() - 1)
+	if focus_target != null and focus_target is Control:
+		focus_target.grab_focus()
+
+func hide_menus() -> void:
+	menu_mode = ""
+	if menu_layer != null:
+		menu_layer.visible = false
+
+func toggle_pause_menu() -> void:
+	if not game_started or $ColorRect.visible or pending_wild_choice:
+		return
+	if busy and menu_mode == "":
+		return
+	if menu_mode == "pause":
+		hide_menus()
+		busy = false
+		update_ui()
+		set_status("Your turn." if PlayerTurn else "Computer is thinking...")
+	elif menu_mode == "":
+		busy = true
+		show_menu_panel("pause")
+		update_ui()
+
+func _on_Start_Button_pressed() -> void:
+	start_new_game()
+
+func _on_Resume_Button_pressed() -> void:
+	hide_menus()
+	busy = false
+	update_ui()
+
+func _on_Restart_Button_pressed() -> void:
+	start_new_game()
+
+func _on_MainMenu_Button_pressed() -> void:
+	show_main_menu()
+
+func _on_HowToPlay_Button_pressed() -> void:
+	show_menu_panel("help")
+
+func _on_Help_Back_Button_pressed() -> void:
+	if game_started:
+		show_menu_panel("pause")
+	else:
+		show_menu_panel("main")
+
+func _on_Quit_Button_pressed() -> void:
+	get_tree().quit()
 
 func show_color_picker() -> void:
 	pending_wild_choice = true
 	color_picker.visible = true
 	color_picker.raise()
+	if first_color_button != null:
+		first_color_button.grab_focus()
 	set_status("Wild card played. Choose the next color.")
 	update_ui()
 
@@ -690,6 +1007,7 @@ func setup_audio() -> void:
 	sfx_streams["draw"] = make_tone(260, 0.07, 0.15)
 	sfx_streams["play"] = make_tone(660, 0.09, 0.18)
 	sfx_streams["error"] = make_tone(130, 0.13, 0.2)
+	sfx_streams["tick"] = make_tone(520, 0.035, 0.08)
 	sfx_streams["win"] = make_chime()
 	for name in sfx_streams.keys():
 		var player = AudioStreamPlayer.new()

@@ -17,7 +17,8 @@ Responsibilities:
 - Validate moves against the active color and top discard value.
 - Apply action-card effects.
 - Run AI decisions.
-- Update HUD labels, active color chip, draw/pass button state, and game-over overlay.
+- Update HUD labels, active color chip, draw/pass button state, menu overlays, and game-over overlay.
+- Handle keyboard, remote, and controller input for card selection and game actions.
 - Animate card movement and UI feedback.
 - Generate lightweight runtime SFX with `AudioStreamSample`.
 - Spawn simple `CPUParticles2D` effects for card plays and wins.
@@ -56,4 +57,6 @@ When the draw pile is empty, every discard except the visible top card is shuffl
 - Invalid plays shake the selected card and play an error tone.
 - Action and wild card plays spawn color-matched particles.
 - The active color chip pulses on turn changes.
+- Modern main, pause, and how-to overlays are generated at runtime with focusable buttons.
+- Keyboard/remote/controller selection uses `selected_card_index` and the same validation path as mouse/touch.
 - Runtime-generated SFX avoids adding binary audio dependencies.

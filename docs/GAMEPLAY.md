@@ -36,6 +36,21 @@ Because this is a two-player game, Skip and Reverse both cause the opponent to l
 - **Wild**: player chooses the next active color.
 - **Wild Draw Four**: player chooses the next active color; opponent draws four cards and loses their next turn.
 
+## Controls
+
+- **Mouse / touch**: select a highlighted card to play it.
+- **Keyboard / TV remote**: Left/Right selects cards, Enter/Space plays, D draws, P passes, Esc opens pause/back.
+- **Controller**: D-pad/left stick selects cards, A plays, X draws, Y passes, B/Start opens pause/back.
+- **DRAW**: draw one card during your turn.
+- **PASS**: end your turn after drawing.
+- **Replay / R**: restart after the game ends.
+
+## Menus
+
+- **Main Menu**: Start the match or view controls/rules.
+- **Pause Menu**: Resume, restart, open controls, or return to the main menu.
+- **How to Play**: Explains supported inputs and core rules.
+
 ## Current Implementation Scope
 
 The game focuses on a smooth single-player experience. It does not currently include stacking Draw cards, challenge rules for Wild Draw Four, online multiplayer, or a scoring match system.

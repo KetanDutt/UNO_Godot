@@ -8,6 +8,8 @@
 - Added a color picker for player wild cards and AI wild-color selection logic.
 - Added draw/pass turn handling to prevent unlimited drawing during a turn.
 - Added status messaging, card/deck counts, active color display, replay reset, and responsive hand layout.
+- Added keyboard, TV remote-style directional input, and controller support.
+- Added modern main, pause, and how-to menus with focus support.
 - Added tweens, hover effects, invalid move feedback, particles, generated SFX, and win feedback.
 - Added architecture and gameplay documentation.
 - Updated project naming and README.
@@ -39,3 +41,6 @@ Before release, verify the following in Godot 3.x:
 - AI can draw, play, pass, and choose wild colors.
 - Discard reshuffle works when the draw pile is exhausted.
 - Game-over overlay appears and Replay starts a clean game.
+- Main menu starts the game and How to Play returns correctly.
+- Esc/B/Start pauses and resumes while keyboard/controller focus remains usable.
+- Keyboard, remote, and controller shortcuts select cards, play, draw, and pass.
