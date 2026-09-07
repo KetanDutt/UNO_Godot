@@ -4,7 +4,8 @@
 # Godot-specific ignores
 .import/
 export.cfg
-export_presets.cfg
+# export_presets.cfg is committed: it makes builds reproducible and contains
+# no secrets (script_encryption_key is empty).
 
 # Imported translations (automatically generated from CSV files)
 *.translation
@@ -26,3 +27,11 @@ Thumbs.db
 *.log
 tmp/
 temp/
+
+# Exported builds. The web export lives on the WebBuild branch / GitHub Pages;
+# committing binaries to the source branch made the repo 22 MB and the artifacts
+# were always stale relative to the scripts beside them.
+build/
+export/
+*.pck
+*.wasm

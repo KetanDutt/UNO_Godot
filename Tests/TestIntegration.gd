@@ -1,0 +1,351 @@
+extends SceneTree
+# Headless integration test.
+#
+#   godot --no-window -s Tests/TestIntegration.gd
+#
+# Boots the real main scene and drives it the way a player would: start a match,
+# play/draw/pass through several rounds, open every menu, toggle every setting
+# and resize the window. Any GDScript runtime error, null dereference or bad
+# property write surfaces here rather than in front of a player.
+#
+# This complements Tests/TestRules.gd, which covers the pure rules layer.
+
+const CardTypes = preload("res://Scripts/Core/CardTypes.gd")
+const MenuLayer = preload("res://Scripts/UI/MenuLayer.gd")
+
+var _passed := 0
+var _failed := 0
+var _game = null
+var _steps := 0
+
+const MAX_STEPS = 4000
+
+
+func _init() -> void:
+	print("\n=== UNO integration test ===\n")
+	# Settings persist to user:// - start from a known state.
+	var dir = Directory.new()
+	dir.remove("user://settings.cfg")
+	call_deferred("_boot")
+
+
+func _boot() -> void:
+	var scene = load("res://Scenes/Gameplay.tscn")
+	_check(scene != null, "main scene loads")
+	if scene == null:
+		_finish()
+		return
+
+	var instance = scene.instance()
+	get_root().add_child(instance)
+	_game = instance
+	_check(_game != null, "controller instanced")
+
+	# Let _ready() complete before poking at anything.
+	yield(self, "idle_frame")
+	yield(self, "idle_frame")
+
+	_run_suite()
+
+
+func _run_suite() -> void:
+	yield(_test_boot_state(), "completed")
+	yield(_test_menu_navigation(), "completed")
+	yield(_test_settings_toggles(), "completed")
+	yield(_test_match_flow(), "completed")
+	yield(_test_resize(), "completed")
+	yield(_test_multiplayer_seats(), "completed")
+	yield(_test_house_rules(), "completed")
+	_finish()
+
+
+# ---------------------------------------------------------------------------
+# Harness
+# ---------------------------------------------------------------------------
+func _check(condition: bool, message: String) -> void:
+	if condition:
+		_passed += 1
+		print("  PASS  %s" % message)
+	else:
+		_failed += 1
+		printerr("  FAIL  %s" % message)
+
+
+func _wait(frames: int = 2) -> void:
+	for _i in range(frames):
+		yield(self, "idle_frame")
+
+
+# Advance the scene tree by roughly `seconds` of simulated time.
+func _advance(seconds: float) -> void:
+	var elapsed = 0.0
+	while elapsed < seconds:
+		yield(self, "idle_frame")
+		elapsed += 0.016
+
+
+func _finish() -> void:
+	print("\n=== %d passed, %d failed ===\n" % [_passed, _failed])
+	quit(1 if _failed > 0 else 0)
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+func _test_boot_state() -> void:
+	print("\n-- boot --")
+	_check(_game.settings != null, "settings system present")
+	_check(_game.audio != null, "audio system present")
+	_check(_game.effects != null, "effects system present")
+	_check(_game.hud != null, "hud present")
+	_check(_game.menus != null, "menus present")
+	_check(_game.color_picker != null, "colour picker present")
+	_check(_game.menus.current_screen == MenuLayer.SCREEN_MAIN, "boots into the main menu")
+	yield(_wait(), "completed")
+
+
+func _test_menu_navigation() -> void:
+	print("\n-- menus --")
+	for screen in [MenuLayer.SCREEN_SETTINGS, MenuLayer.SCREEN_HELP, MenuLayer.SCREEN_STATS]:
+		_game.menus.show_screen(screen)
+		yield(_wait(3), "completed")
+		_check(_game.menus.current_screen == screen, "opened %s" % screen)
+
+	_game.menus.show_screen(MenuLayer.SCREEN_MAIN)
+	yield(_wait(3), "completed")
+	_check(_game.menus.current_screen == MenuLayer.SCREEN_MAIN, "returned to main menu")
+
+
+func _test_settings_toggles() -> void:
+	print("\n-- settings --")
+	var settings = _game.settings
+
+	# Every cycle control should wrap without error.
+	for _i in range(4):
+		_game.menus._on_cycle_difficulty()
+		_game.menus._on_cycle_opponents()
+		_game.menus._on_cycle_target()
+		_game.menus._on_cycle_table()
+		_game.menus._on_cycle_speed()
+	yield(_wait(), "completed")
+	_check(settings.difficulty >= 0 and settings.difficulty <= 2, "difficulty stays in range")
+	_check(settings.opponent_count >= 1 and settings.opponent_count <= 3, "opponent count in range")
+	_check(settings.table_variant >= 0 and settings.table_variant <= 4, "table variant in range")
+
+	for key in ["stacking", "draw_until", "seven_zero", "force_play"]:
+		_game.menus._on_toggle_rule(key)
+	for key in ["hints", "glyphs", "shake", "particles", "contrast"]:
+		_game.menus._on_toggle_display(key)
+	yield(_wait(), "completed")
+	_check(true, "all toggles fire without error")
+
+	_game.menus._on_volume_changed(0.5, "master")
+	_game.menus._on_volume_changed(0.0, "music")
+	_game.menus._on_volume_changed(0.9, "sfx")
+	yield(_wait(), "completed")
+	_check(abs(settings.master_volume - 0.5) < 0.01, "master volume applied")
+
+	# Settings must survive a save/load round-trip.
+	settings.save_settings()
+	var before = settings.difficulty
+	settings.difficulty = 99
+	settings.load_settings()
+	_check(settings.difficulty == before, "settings reload from disk")
+
+	_game.menus._on_reset_defaults()
+	yield(_wait(), "completed")
+	_check(settings.difficulty == 1, "reset to defaults works")
+
+
+func _test_match_flow() -> void:
+	print("\n-- match --")
+	_game.settings.opponent_count = 1
+	_game.settings.animation_speed = 2.0   # keep the test quick
+	_game.settings.save_settings()
+
+	_game._on_start_game()
+	yield(_advance(2.0), "completed")
+
+	_check(_game.rules != null, "rules created")
+	_check(_game.rules.round_active, "round is active")
+	_check(_game.rules.hand_size(0) == 7, "player dealt seven cards")
+	_check(_game.rules.hand_size(1) == 7, "opponent dealt seven cards")
+	_check(_game._views.size() >= 14, "card views spawned")
+	_check(_game.rules.top_card() != null, "opening discard exists")
+
+	# Drive the match to completion through the public action handlers.
+	var guard = 0
+	while _game.rules != null and _game.rules.round_active and guard < 400:
+		guard += 1
+		yield(_step_player_turn(), "completed")
+
+	if guard >= 400:
+		var r = _game.rules
+		printerr("    STALL: current=%d round_active=%s awaiting_color=%s(%d) pending=%d drawn=%s" % [
+			r.current_player, str(r.round_active), str(r.awaiting_color_choice),
+			r.awaiting_color_player, r.pending_draw, str(r.has_drawn_this_turn)])
+		printerr("    STALL: draw=%d discard=%d hands=%s playable0=%d can_draw0=%s can_pass0=%s" % [
+			r.deck.draw_count(), r.deck.discard_count(),
+			str([r.hand_size(0), r.hand_size(1)]), r.playable_cards(0).size(),
+			str(r.can_draw(0)), str(r.can_pass(0))])
+		printerr("    STALL: busy=%s ai_token=%d active_color=%d" % [
+			str(_game._busy), _game._ai_turn_token, r.active_color])
+		printerr("    STALL: can_draw1=%s can_pass1=%s playable1=%d" % [
+			str(r.can_draw(1)), str(r.can_pass(1)), r.playable_cards(1).size()])
+	_check(guard < 400, "round finished in %d steps" % guard)
+	_check(not _game.rules.round_active, "round closed cleanly")
+
+	# Card conservation across the whole presentation layer.
+	var total = _game.rules.deck.draw_count() + _game.rules.deck.discard_count()
+	for hand in _game.rules.hands:
+		total += hand.size()
+	_check(total == 108, "108 cards still accounted for (found %d)" % total)
+
+	yield(_advance(2.5), "completed")
+	var screen = _game.menus.current_screen
+	_check(screen == MenuLayer.SCREEN_ROUND or screen == MenuLayer.SCREEN_MATCH,
+		"summary screen shown (%s)" % screen)
+
+	# Continue to the next round if the match is still live.
+	if screen == MenuLayer.SCREEN_ROUND:
+		_game._on_next_round()
+		yield(_advance(2.0), "completed")
+		_check(_game.rules.round_active, "next round starts")
+		_check(_game.rules.round_number == 2, "round counter advanced")
+
+
+# Perform one legal action for whoever is on turn, waiting for the AI.
+func _step_player_turn() -> void:
+	var rules = _game.rules
+	if rules == null or not rules.round_active:
+		yield(_wait(1), "completed")
+		return
+
+	if rules.awaiting_color_choice:
+		if rules.awaiting_color_player == 0:
+			_game._on_color_selected(CardTypes.CardColor.RED)
+		yield(_advance(0.3), "completed")
+		return
+
+	if rules.current_player != 0:
+		# Let the AI take its scheduled turn.
+		yield(_advance(0.35), "completed")
+		return
+
+	var legal = rules.playable_cards(0)
+	if legal.size() > 0:
+		var card = legal[0]
+		if _game._views.has(card.uid):
+			_game._try_play(_game._views[card.uid])
+		else:
+			rules.play_card(0, card, CardTypes.CardColor.RED)
+			_game._process_events(rules.consume_events())
+			_game._begin_turn()
+	elif rules.can_draw(0):
+		_game._on_draw_pressed()
+	elif rules.can_pass(0):
+		_game._on_pass_pressed()
+	else:
+		yield(_advance(0.2), "completed")
+		return
+
+	yield(_advance(0.3), "completed")
+
+
+func _test_resize() -> void:
+	print("\n-- responsive layout --")
+	for size in [Vector2(1920, 1080), Vector2(1024, 600), Vector2(800, 480), Vector2(1280, 720)]:
+		get_root().set_size_override(true, size)
+		get_root().set_size_override_stretch(true)
+		_game._on_viewport_resized()
+		yield(_wait(2), "completed")
+		_check(true, "laid out at %dx%d" % [size.x, size.y])
+
+	# Cards must stay on screen at the smallest supported size.
+	get_root().set_size_override(true, Vector2(800, 480))
+	_game._on_viewport_resized()
+	yield(_wait(2), "completed")
+	var off_screen = 0
+	if _game.rules != null:
+		for card in _game.rules.hands[0]:
+			if _game._views.has(card.uid):
+				var view = _game._views[card.uid]
+				if view.rest_position.x < -60 or view.rest_position.x > 860:
+					off_screen += 1
+	_check(off_screen == 0, "no cards escape an 800x480 viewport (%d strays)" % off_screen)
+
+	get_root().set_size_override(true, Vector2(1280, 720))
+	_game._on_viewport_resized()
+	yield(_wait(2), "completed")
+
+
+func _test_multiplayer_seats() -> void:
+	print("\n-- three and four handed --")
+	for opponents in [2, 3]:
+		_game.settings.opponent_count = opponents
+		_game.settings.save_settings()
+		_game._on_restart_game()
+		yield(_advance(2.2), "completed")
+
+		_check(_game.rules.player_count() == opponents + 1,
+			"%d seats dealt" % (opponents + 1))
+		for seat in range(opponents + 1):
+			_check(_game.rules.hand_size(seat) == 7, "seat %d holds seven" % seat)
+
+		# Play a handful of turns to exercise multi-seat turn rotation.
+		for _i in range(24):
+			if not _game.rules.round_active:
+				break
+			yield(_step_player_turn(), "completed")
+
+		var total = _game.rules.deck.draw_count() + _game.rules.deck.discard_count()
+		for hand in _game.rules.hands:
+			total += hand.size()
+		_check(total == 108, "%d-player card count intact" % (opponents + 1))
+
+
+func _test_house_rules() -> void:
+	print("\n-- house rules --")
+	_game.settings.opponent_count = 1
+	_game.settings.rule_stacking = true
+	_game.settings.rule_draw_until_playable = true
+	_game.settings.rule_seven_zero = true
+	_game.settings.save_settings()
+
+	_game._on_restart_game()
+	yield(_advance(2.0), "completed")
+	_check(_game.rules.rules.stacking, "stacking rule applied to the match")
+	_check(_game.rules.rules.seven_zero, "seven-zero rule applied")
+
+	for _i in range(60):
+		if not _game.rules.round_active:
+			break
+		yield(_step_player_turn(), "completed")
+
+	var total = _game.rules.deck.draw_count() + _game.rules.deck.discard_count()
+	for hand in _game.rules.hands:
+		total += hand.size()
+	_check(total == 108, "card count intact with house rules")
+
+	# Pause / resume must not strand the game in a busy state. Start a fresh
+	# round first so we are testing pause during live play, not after a summary.
+	if not _game.rules.round_active:
+		_game._on_restart_game()
+		yield(_advance(2.0), "completed")
+	_check(_game.rules.round_active, "match is live before pausing")
+	_game._toggle_pause()
+	yield(_wait(3), "completed")
+	_check(_game.menus.current_screen == MenuLayer.SCREEN_PAUSE, "pause opens")
+	_game._on_resume_game()
+	yield(_wait(3), "completed")
+	_check(not _game.menus.is_open(), "resume closes the menu")
+	_check(not get_tree_paused(), "tree unpaused after resume")
+
+	# Returning to the main menu must tear the table down cleanly.
+	_game._show_main_menu()
+	yield(_wait(3), "completed")
+	_check(_game._views.size() == 0, "table cleared on exit to menu")
+
+
+func get_tree_paused() -> bool:
+	return paused

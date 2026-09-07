@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint (gdlint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install gdtoolkit
+        run: pip install "gdtoolkit==3.5.*"
+
+      - name: Parse every script
+        run: gdparse $(find Scripts Tests -name '*.gd')
+
+      - name: Lint
+        run: gdlint Scripts/ Tests/
+
+  test:
+    name: Headless tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-3.5.3-linux-headless
+
+      - name: Download Godot 3.5.3 (headless)
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot
+          curl -fsSL -o /tmp/godot.zip \
+            https://github.com/godotengine/godot/releases/download/3.5.3-stable/Godot_v3.5.3-stable_linux_headless.64.zip
+          unzip -q /tmp/godot.zip -d ~/godot
+          mv ~/godot/Godot_v3.5.3-stable_linux_headless.64 ~/godot/godot
+          chmod +x ~/godot/godot
+
+      - name: Import assets
+        # First run generates .import/; it exits non-zero by design.
+        run: ~/godot/godot --no-window --editor --quit || true
+
+      - name: Rules engine tests
+        run: ~/godot/godot --no-window -s Tests/TestRules.gd
+
+      - name: Layout tests
+        run: ~/godot/godot --no-window -s Tests/TestLayout.gd
+
+      - name: Integration tests
+        run: ~/godot/godot --no-window -s Tests/TestIntegration.gd
