@@ -1,19 +1,21 @@
-[gd_scene load_steps=3 format=2]
+[gd_scene load_steps=4 format=2]
 
 [ext_resource path="res://Assets/Uno Game Assets/Deck.png" type="Texture" id=1]
 [ext_resource path="res://Scripts/Card.gd" type="Script" id=2]
+
+[sub_resource type="RectangleShape2D" id=1]
+extents = Vector2( 194, 281 )
 
 [node name="Card" type="Sprite"]
 scale = Vector2( 0.4, 0.4 )
 texture = ExtResource( 1 )
 script = ExtResource( 2 )
 
-[node name="TextureButton" type="TextureButton" parent="."]
-anchor_right = 1.0
-anchor_bottom = 1.0
-margin_left = -194.0
-margin_top = -281.0
-margin_right = -194.0
-margin_bottom = -281.0
+[node name="Area2D" type="Area2D" parent="."]
 
-[connection signal="pressed" from="TextureButton" to="." method="_on_TextureButton_pressed"]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Area2D"]
+shape = SubResource( 1 )
+
+[connection signal="input_event" from="Area2D" to="." method="_on_Area2D_input_event"]
+[connection signal="mouse_entered" from="Area2D" to="." method="_on_Area2D_mouse_entered"]
+[connection signal="mouse_exited" from="Area2D" to="." method="_on_Area2D_mouse_exited"]
