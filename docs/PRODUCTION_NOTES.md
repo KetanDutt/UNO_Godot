@@ -9,7 +9,8 @@
 - Added draw/pass turn handling to prevent unlimited drawing during a turn.
 - Added status messaging, card/deck counts, active color display, replay reset, and responsive hand layout.
 - Added keyboard, TV remote-style directional input, and controller support.
-- Added modern main, pause, and how-to menus with focus support.
+- Added modern main, pause, how-to, and settings menus with focus support.
+- Added UNO call handling, missed-UNO penalties, hand sorting, and an SFX toggle.
 - Added tweens, hover effects, invalid move feedback, particles, generated SFX, and win feedback.
 - Added architecture and gameplay documentation.
 - Updated project naming and README.
@@ -43,4 +44,6 @@ Before release, verify the following in Godot 3.x:
 - Game-over overlay appears and Replay starts a clean game.
 - Main menu starts the game and How to Play returns correctly.
 - Esc/B/Start pauses and resumes while keyboard/controller focus remains usable.
-- Keyboard, remote, and controller shortcuts select cards, play, draw, and pass.
+- Keyboard, remote, and controller shortcuts select cards, play, draw, pass, call UNO, and sort the hand.
+- Missing an UNO call at one remaining card applies a two-card penalty.
+- Settings menu toggles SFX and returns to the correct previous menu.

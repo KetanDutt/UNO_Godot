@@ -45,6 +45,8 @@ A `Sprite` with an `Area2D` and `CollisionShape2D`. This fixes card input reliab
 - `AICards`: Card scene instances in the AI hand.
 - `CenterCards`: Card scene instances in the discard stack.
 - `active_color`: The effective color to match. Wild cards update this value without changing their printed color.
+- `selected_card_index`: The hand cursor used by keyboard, remote, and controller navigation.
+- `player_called_uno`: Tracks whether the player safely armed an UNO call before going to one card.
 
 ## Reshuffling
 
@@ -57,6 +59,7 @@ When the draw pile is empty, every discard except the visible top card is shuffl
 - Invalid plays shake the selected card and play an error tone.
 - Action and wild card plays spawn color-matched particles.
 - The active color chip pulses on turn changes.
-- Modern main, pause, and how-to overlays are generated at runtime with focusable buttons.
+- Modern main, pause, how-to, and settings overlays are generated at runtime with focusable buttons.
 - Keyboard/remote/controller selection uses `selected_card_index` and the same validation path as mouse/touch.
+- UNO calls, missed-call penalties, hand sorting, and SFX toggling are handled by `GameManager` to keep card nodes simple.
 - Runtime-generated SFX avoids adding binary audio dependencies.

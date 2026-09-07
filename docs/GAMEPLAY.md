@@ -11,7 +11,8 @@ Be the first player to play every card in your hand.
 1. The active player may play one valid card.
 2. A valid card must match the active color, match the top discard value, or be a Wild card.
 3. If the human player draws a card, they may play it if it is valid or press **PASS**.
-4. The computer draws when it has no valid card. If the drawn card is valid, the computer immediately plays it; otherwise, it passes.
+4. Call **UNO!** before playing down from two cards to one card. Missing the call draws two penalty cards.
+5. The computer draws when it has no valid card. If the drawn card is valid, the computer immediately plays it; otherwise, it passes.
 
 ## Cards
 
@@ -39,8 +40,8 @@ Because this is a two-player game, Skip and Reverse both cause the opponent to l
 ## Controls
 
 - **Mouse / touch**: select a highlighted card to play it.
-- **Keyboard / TV remote**: Left/Right selects cards, Enter/Space plays, D draws, P passes, Esc opens pause/back.
-- **Controller**: D-pad/left stick selects cards, A plays, X draws, Y passes, B/Start opens pause/back.
+- **Keyboard / TV remote**: Left/Right selects cards, Enter/Space plays, D draws, P passes, U calls UNO, S sorts, Esc opens pause/back.
+- **Controller**: D-pad/left stick selects cards, A plays, X draws, Y passes, RB calls UNO, LB sorts, B/Start opens pause/back.
 - **DRAW**: draw one card during your turn.
 - **PASS**: end your turn after drawing.
 - **Replay / R**: restart after the game ends.
@@ -48,8 +49,9 @@ Because this is a two-player game, Skip and Reverse both cause the opponent to l
 ## Menus
 
 - **Main Menu**: Start the match or view controls/rules.
-- **Pause Menu**: Resume, restart, open controls, or return to the main menu.
+- **Pause Menu**: Resume, restart, open controls/settings, or return to the main menu.
 - **How to Play**: Explains supported inputs and core rules.
+- **Settings**: Toggle generated SFX on or off.
 
 ## Current Implementation Scope
 

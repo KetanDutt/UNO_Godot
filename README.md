@@ -14,8 +14,9 @@ Live build: https://ketandutt.github.io/UNO_Godot/
 - Playable-card highlighting and hover lift animations.
 - Smooth card movement, discard animations, turn feedback, color picker, particles, and runtime-generated SFX.
 - Responsive card layout for different window sizes.
-- Modern main, pause, and how-to menus with keyboard/controller focus support.
+- Modern main, pause, how-to, and settings menus with keyboard/controller focus support.
 - Keyboard, TV remote-style D-pad, controller, mouse, and touch-friendly controls.
+- UNO call, missed-UNO penalty, sort-hand, and SFX toggle quality-of-life features.
 - In-game status text, active color indicator, hand counts, deck count, pass flow, replay flow, and game-over summary.
 
 ## How to Play
@@ -29,8 +30,8 @@ Live build: https://ketandutt.github.io/UNO_Godot/
 ## Controls
 
 - **Mouse / touch**: select a highlighted card to play it.
-- **Keyboard / TV remote**: Left/Right selects cards, Enter/Space plays, D draws, P passes, Esc opens pause/back.
-- **Controller**: D-pad/left stick selects cards, A plays, X draws, Y passes, B/Start opens pause/back.
+- **Keyboard / TV remote**: Left/Right selects cards, Enter/Space plays, D draws, P passes, U calls UNO, S sorts, Esc opens pause/back.
+- **Controller**: D-pad/left stick selects cards, A plays, X draws, Y passes, RB calls UNO, LB sorts, B/Start opens pause/back.
 - **DRAW**: draw one card during your turn.
 - **PASS**: end your turn after drawing.
 - **Replay / R**: restart after the game ends.
