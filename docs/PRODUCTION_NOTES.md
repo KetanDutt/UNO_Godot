@@ -30,6 +30,13 @@ headless test suites or the layout preview renderer.
 | **Scoreboard overflow** (found by running) | At 800×480 the `ROUND n - FIRST TO 500` header rendered wider than its panel and ran off the right edge. It now abbreviates, and a test asserts every HUD string fits its rectangle. |
 | Resize handled one node | `_on_viewport_size_changed()` repositioned only the top centre card. |
 | Card view defects | Hover scaling restored on non-playable cards; `set_interaction_enabled(false)` called `stop_all()` and could strand a card mid-flight; stale `home_position` after a resize; a permanent `raise()` broke fan z-order; the face texture was assigned while the card was still face-down, leaking a one-frame reveal. |
+| **The discard pile painted in deal order** (found by running) | Hand cards and the pile shared the z range 0..29, and every discard past the sixth landed on the same z (10 + pile size, with the pile capped at six). Godot breaks z ties in tree order — spawn order — so a freshly played card slid *under* the card it was supposed to cover. Each group now owns a `DrawOrder` z band, and the pile is re-stamped bottom-to-top on every play. |
+| **Cards in transit drew under the table furniture** (found by running) | A card dealt from the deck flew with its final hand index (z 0..6), i.e. *under* the deck backs (z 1..4), and a card thrown at the pile (z ~10-16) flew under every hand card past index ten. Dealt, drawn and played cards now fly in a dedicated band above everything at rest and settle into their band only on landing. |
+| **The staggered deal never played** (found by running) | `deal_from()` built a delayed, staggered flight, then the `_refresh_all()` at the end of the event batch called `move_to()` on every card, killing each deal tween before a frame rendered — all cards left the deck simultaneously. Dealt cards now fly straight to their fan slot and the layout recognises an in-flight card already heading there. |
+| **A refresh stomped the hovered card's depth** (found by running) | Any event-batch refresh reset a hovered card's z to its resting depth while it was still lifted, dropping it under its neighbours until the mouse moved again. `move_to()` now defers to the hover (and drag) state. |
+| **Invalid native icon on Windows** | `config/windows_native_icon` pointed at `icon.png`; the Windows loader expects a real `.ico`, and boot failed its `idType != 1` check on the PNG header. Shipped a proper DIB-encoded `icon.ico` (16–64 px, 32 bpp) generated from the same artwork. |
+| Editor script warnings | Two unused locals (`TableLayout.metrics()`, `AudioDirector._make_card_draw()`) and six HUD signals emitted through a variable — `emit_signal(signal_name)` — which the 3.5 parser cannot see, so it reported them as never emitted. Buttons now dispatch through a `match` that emits each signal by literal, and the dead `_on_button_hover` stub (GameController already plays the hover cue on those buttons) is gone. |
+| **Ghost cards hung the game** (found by running) | Three paths could interrupt a card's deal flight and leave it stranded: a re-layout while the fan re-flowed killed the fade-in (a permanent near-invisible card), a rejection shake on a card still flying in left it stuck in the flight band above the fan — floating there and swallowing clicks meant for the cards beneath, which reads as "the game hangs" until a pause/resume (whose refresh, plus the mouse crossing the cards afterwards, re-lays the hand) — and `move_to()` kept deferring to flight tweens that were already dead, because `SceneTreeTween.kill()` does not clear `is_valid()`. Every interruption now lands the card: re-targets finish an interrupted fade, the shake restores pose/opacity/flight state, liveness is judged by `is_running()`, and `_settle()` guarantees a landed card is opaque. A soak probe (`Tests/HangProbe.gd`) drives the real input path — hovers, clicks, drags, misclicks, UNO-less play — across opponent/animation/rule configs and flags any hand card that is off-slot, invisible, transparent or stuck in flight. |
 | Use-after-free | Culled discard views could still be reached by a pending click or timer. Guarded with `is_instance_valid()`. |
 
 ## Performance
@@ -57,12 +64,13 @@ headless test suites or the layout preview renderer.
 
 ## Testing
 
-3070 assertions across three headless suites, all wired into CI:
+3121 assertions across four headless suites, all wired into CI:
 
 | Suite | Assertions | Scope |
 | --- | --- | --- |
 | `TestRules.gd` | 370 | Rules engine, AI legality, card conservation, 100-game seeded soak. |
 | `TestLayout.gd` | 2644 | Geometry at 7 resolutions × 7 hand sizes, text fit, glyph coverage. |
+| `TestDrawOrder.gd` | 51 | Canvas strata, z bands, the pile's play order, cards in transit, hover/drag depth, pathological hand sizes, interrupted-flight healing. |
 | `TestIntegration.gd` | 56 | Boots the real scene: menus, settings, save/reload, full matches, 3- and 4-handed play, house rules, resizes, pause, teardown. |
 
 Every suite exits non-zero on failure. Verified by deliberately introducing a

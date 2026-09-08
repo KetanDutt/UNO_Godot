@@ -15,6 +15,12 @@ extends Node2D
 #   * The face texture was assigned even while face-down, briefly leaking the
 #     opponent's hand on the first frame.
 #
+# Depth: every resting card sits in its DrawOrder band (deck, discard, hands).
+# While a card is in transit - dealt, drawn, played, or leaving the table - it
+# flies in the DrawOrder.FLYING band above every resting card, and settles
+# into its resting band only when the flight completes. Hover and drag lift
+# the card into their own bands without disturbing its resting depth.
+#
 # Presentation features: pseudo-3D flip (x-scale through zero), spring hover,
 # drag-to-play, playable glow, disabled dimming, and a shadow that tracks lift.
 
@@ -25,6 +31,7 @@ signal drag_started(view)
 signal drag_ended(view, global_pos)
 
 const CardTypes = preload("res://Scripts/Core/CardTypes.gd")
+const DrawOrder = preload("res://Scripts/UI/DrawOrder.gd")
 
 # The source art is 388x562. The rendered scale is supplied by TableLayout so
 # cards shrink together with the rest of the composition on small windows.
@@ -53,6 +60,10 @@ var focused: bool = false
 var rest_position: Vector2 = Vector2.ZERO
 var rest_rotation: float = 0.0
 var rest_z: int = 0
+
+# True between the start of a deal/draw/play flight and the moment it lands.
+# While set, the card draws in the DrawOrder.FLYING band (see _settle).
+var _in_flight: bool = false
 
 var _sprite: Sprite = null
 var _shadow: Sprite = null
@@ -254,41 +265,108 @@ func _update_glow() -> void:
 # ---------------------------------------------------------------------------
 # Layout
 # ---------------------------------------------------------------------------
+# The z a card should show while it is parked at its resting place: the hover
+# band when lifted, otherwise its resting band.
+func _hover_or_rest_z() -> int:
+	if _is_hovered and not _in_flight:
+		return DrawOrder.HOVER
+	if _in_flight:
+		# Hover does not lift a flying card out of the flight band.
+		return DrawOrder.FLYING
+	return rest_z
+
+
+# Called when a flight completes: leave the flight band and settle into the
+# resting (or hover) band.
+func _settle() -> void:
+	_in_flight = false
+	# Whatever owned this card on the way in, a landed card is fully opaque -
+	# an interrupted fade-in must never leave a ghost sitting in the fan.
+	modulate.a = 1.0
+	z_index = _hover_or_rest_z()
+
+
+# Update a resting card's depth without disturbing an active flight, hover or
+# drag. The discard pile re-stamps its whole stack on every play.
+func set_rest_z(z: int) -> void:
+	rest_z = z
+	if not _in_flight and not _is_dragging:
+		z_index = _hover_or_rest_z()
+
+
 # Move to a new resting place. When `animated` is false the card snaps (used on
 # window resize so nothing appears to slide around).
 func move_to(target: Vector2, target_rotation: float, z: int,
 		animated: bool = true, delay: float = 0.0) -> void:
+	# A card already flying to exactly this slot keeps its staggered flight;
+	# re-targeting here would collapse the deal into one simultaneous clump
+	# and drop the card out of the flight band mid-air. The flight must be
+	# alive, though: SceneTreeTween.kill() does not clear is_valid(), so the
+	# liveness test is is_running() - a killed or finished tween is going
+	# nowhere, and deferring to it would strand the card in the flight band
+	# forever.
+	var en_route = animated and _in_flight \
+		and _move_tween != null and _move_tween.is_valid() and _move_tween.is_running() \
+		and z == rest_z \
+		and target.distance_to(rest_position) < 0.5 \
+		and abs(target_rotation - rest_rotation) < 0.1
+
 	rest_position = target
 	rest_rotation = target_rotation
 	rest_z = z
-	z_index = z
+
+	# A drag owns the card completely; a re-layout must not fight it.
+	if _is_dragging or en_route:
+		return
 
 	if _move_tween != null and _move_tween.is_valid():
 		_move_tween.kill()
 
 	if not animated:
+		_in_flight = false
 		position = target
 		rotation_degrees = target_rotation
+		z_index = _hover_or_rest_z()
+		modulate.a = 1.0
 		return
+
+	# A card already in transit keeps the flight band until it lands; anything
+	# else drops straight into its resting (or hover) band.
+	if not _in_flight:
+		z_index = _hover_or_rest_z()
+
+	# A hovered card tweens to its lifted pose so a re-layout mid-hover does
+	# not yank it back down into the fan.
+	var flight_target = target + (_lift() if _is_hovered and not _in_flight else Vector2.ZERO)
+	var flight_rotation = 0.0 if _is_hovered and not _in_flight else target_rotation
 
 	_move_tween = create_tween()
 	_move_tween.set_parallel(true)
 	var duration = _anim(0.34)
-	_move_tween.tween_property(self, "position", target, duration) \
+	_move_tween.tween_property(self, "position", flight_target, duration) \
 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT).set_delay(delay)
-	_move_tween.tween_property(self, "rotation_degrees", target_rotation, duration) \
+	_move_tween.tween_property(self, "rotation_degrees", flight_rotation, duration) \
 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT).set_delay(delay)
 	if not _is_hovered:
 		_move_tween.tween_property(self, "scale", _base(), duration * 0.8) \
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT).set_delay(delay)
+	# Taking over a card whose fade-in was interrupted must finish that fade,
+	# or the card lands as a permanent ghost.
+	if modulate.a < 0.999:
+		_move_tween.tween_property(self, "modulate:a", 1.0, min(_anim(0.18), duration)) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT).set_delay(delay)
+	if _in_flight:
+		_move_tween.chain().tween_callback(self, "_settle")
 
 
-# Arc a card from the deck into the hand - a straight lerp looks lifeless.
+# Arc a card from the deck into its fan slot - a straight lerp looks lifeless.
+# The card flies above everything at rest and settles when it lands.
 func deal_from(origin: Vector2, target: Vector2, target_rotation: float, z: int, delay: float) -> void:
 	rest_position = target
 	rest_rotation = target_rotation
 	rest_z = z
-	z_index = z
+	_in_flight = true
+	z_index = DrawOrder.FLYING
 	position = origin
 	rotation_degrees = rand_range(-25, 25)
 	scale = _base() * 0.75
@@ -309,6 +387,7 @@ func deal_from(origin: Vector2, target: Vector2, target_rotation: float, z: int,
 	_move_tween.tween_property(self, "scale", _base(), duration) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_move_tween.tween_property(self, "modulate:a", 1.0, duration * 0.5)
+	_move_tween.chain().tween_callback(self, "_settle")
 
 
 # Fly to the discard pile with a small overshoot and settle.
@@ -321,7 +400,11 @@ func play_to(target: Vector2, target_rotation: float, z: int,
 		_pulse_tween = null
 
 	_glow.modulate.a = 0.0
-	z_index = z
+	rest_position = target
+	rest_rotation = target_rotation
+	rest_z = z
+	_in_flight = true
+	z_index = DrawOrder.FLYING
 	set_interactive(false)
 
 	var duration = _anim(0.36)
@@ -336,6 +419,7 @@ func play_to(target: Vector2, target_rotation: float, z: int,
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	_move_tween.chain().tween_property(self, "scale", _base(), duration * 0.5) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_move_tween.chain().tween_callback(self, "_settle")
 	if on_complete_target != null and on_complete_method != "":
 		_move_tween.chain().tween_callback(on_complete_target, on_complete_method, [self])
 
@@ -344,6 +428,8 @@ func play_to(target: Vector2, target_rotation: float, z: int,
 func fly_out(target: Vector2) -> void:
 	if _move_tween != null and _move_tween.is_valid():
 		_move_tween.kill()
+	_in_flight = true
+	z_index = DrawOrder.FLYING
 	var duration = _anim(0.3)
 	_move_tween = create_tween()
 	_move_tween.set_parallel(true)
@@ -407,6 +493,20 @@ func shake_invalid() -> void:
 			.set_trans(Tween.TRANS_SINE)
 	_move_tween.tween_property(self, "position:x", origin.x, duration).set_trans(Tween.TRANS_SINE)
 
+	# The shake replaced whatever owned this card - including a deal flight
+	# whose fade-in it killed. Land it properly afterwards (full pose, opacity,
+	# flight state), so a rejected click on a card still flying in from the
+	# deck cannot strand it in the flight band as a click-swallowing ghost.
+	_move_tween.tween_property(self, "position", origin, _anim(0.12)) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_move_tween.tween_property(self, "rotation_degrees", rest_rotation, _anim(0.12)) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	if modulate.a < 0.999:
+		_move_tween.tween_property(self, "modulate:a", 1.0, _anim(0.15)) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if _in_flight:
+		_move_tween.tween_callback(self, "_settle")
+
 	# Flash red so the rejection reads even with sound off.
 	var flash = create_tween()
 	flash.tween_property(_sprite, "modulate", Color(1.4, 0.45, 0.45, 1), _anim(0.08))
@@ -456,8 +556,12 @@ func _on_mouse_exited() -> void:
 func _apply_hover(active: bool) -> void:
 	if _hover_tween != null and _hover_tween.is_valid():
 		_hover_tween.kill()
-	# Lift above neighbours while hovered, then restore the fan order on exit.
-	z_index = rest_z + (60 if active else 0)
+	# Lift into the hover band, then restore the resting depth on exit (a card
+	# in transit stays in the flight band until it lands).
+	if _in_flight:
+		z_index = DrawOrder.FLYING
+	else:
+		z_index = DrawOrder.HOVER if active else _hover_or_rest_z()
 
 	var target_position = rest_position + (_lift() if active else Vector2.ZERO)
 	var target_scale = _hover() if active else _base()
@@ -521,7 +625,7 @@ func _begin_drag() -> void:
 	_is_dragging = true
 	if _hover_tween != null and _hover_tween.is_valid():
 		_hover_tween.kill()
-	z_index = rest_z + 200
+	z_index = DrawOrder.DRAG
 	var tween = create_tween()
 	tween.tween_property(self, "scale", _drag(), _anim(0.12)) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
@@ -538,3 +642,8 @@ func cancel_drag() -> void:
 
 func is_dragging() -> bool:
 	return _is_dragging
+
+
+# True while a deal/draw/play flight is still running.
+func is_in_flight() -> bool:
+	return _in_flight

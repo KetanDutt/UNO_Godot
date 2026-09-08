@@ -16,12 +16,13 @@ extends Reference
 const GameRules = preload("res://Scripts/Core/GameRules.gd")
 const CardTypes = preload("res://Scripts/Core/CardTypes.gd")
 const TableLayout = preload("res://Scripts/UI/TableLayout.gd")
+const DrawOrder = preload("res://Scripts/UI/DrawOrder.gd")
 const ThemeFactory = preload("res://Scripts/Systems/ThemeFactory.gd")
 const Deck = preload("res://Scripts/Core/Deck.gd")
 const MenuLayer = preload("res://Scripts/UI/MenuLayer.gd")
 
 # Older discards are culled from the scene tree; only this many stay visible.
-const DISCARD_VISIBLE_LIMIT = 6
+const DISCARD_VISIBLE_LIMIT = DrawOrder.PILE_DEPTH
 
 var _game = null
 
@@ -90,10 +91,13 @@ func _on_event_card_dealt(event: Dictionary) -> void:
 	var player = event["player"]
 	var card = event["card"]
 	var view = _game._spawn_view(card, player != 0)
-	# Stagger the deal so cards arrive one at a time like a real dealer.
+	# Stagger the deal so cards arrive one at a time like a real dealer. Cards
+	# fly straight to their fan slot in the flight band (above the deck backs
+	# they start on and above every resting card they pass).
 	var delay = _game.settings.anim_scale(0.055) * (event["index"] * _game.rules.player_count() + player)
-	var anchor = _game._anchor_for(player)
-	view.deal_from(_game._deck_position(), anchor, 0.0, event["index"], delay)
+	var slot = _game._fan_slot(player, event["index"])
+	view.set_card_scale(slot["scale"])
+	view.deal_from(_game._deck_position(), slot["position"], slot["rotation"], slot["z"], delay)
 	_schedule_deal_sound(delay)
 
 
@@ -105,22 +109,28 @@ func _schedule_deal_sound(delay: float) -> void:
 func _on_event_opening(event: Dictionary) -> void:
 	var card = event["card"]
 	var view = _game._spawn_view(card, true)
+	# The opening card's view belongs to the pile, not to any hand: drop it
+	# from the view registry (exactly like a played card) so a later recycle
+	# + redraw of the same card cannot "find" a stale pile view and skip
+	# spawning a fresh one, leaving the drawn card with no view of its own.
+	_game._views.erase(card.uid)
+	# The opening card waits face-down ON TOP of the deck (its discard-band
+	# depth sits above the deck backs) until the dealer flips it out.
 	view.position = _game._deck_position()
+	_game._discard_views.append(view)
+	_stamp_discard_order()
 	var deal_time = _game.settings.anim_scale(0.055) \
 		* _game.rules.player_count() * _game.rules.rules.starting_hand
 	var delay = deal_time + 0.1
 	var timer = _game.get_tree().create_timer(delay)
 	timer.connect("timeout", self, "_reveal_opening", [view])
-	_game._discard_views.append(view)
 
 
 func _reveal_opening(view) -> void:
 	# The round can end (or restart) before this timer fires.
 	if not is_instance_valid(view):
 		return
-	if not is_instance_valid(view):
-		return
-	view.play_to(_game._discard_position(), rand_range(-6, 6), 10)
+	view.play_to(_game._discard_position(), rand_range(-6, 6), view.rest_z)
 	view.flip_to(true)
 	_game._play_cue("card_place")
 	_game.effects.burst(_game._discard_position(), CardTypes.color_value(_game.rules.active_color), 18)
@@ -142,6 +152,11 @@ func _on_event_card_played(event: Dictionary) -> void:
 	for ai in _game.ai_players:
 		ai.note_play(player, card)
 
+	# Cull the pile, then re-stamp its depth order before the flight: the new
+	# top card must land above every card already resting there.
+	_cull_discards()
+	_stamp_discard_order()
+
 	# Rotate each discard slightly so the pile looks hand-stacked.
 	var rotation = rand_range(-9, 9)
 	var offset = Vector2(rand_range(-9, 9), rand_range(-7, 7))
@@ -149,7 +164,7 @@ func _on_event_card_played(event: Dictionary) -> void:
 	view.set_focused(false)
 	if view.face_down:
 		view.flip_to(true)
-	view.play_to(_game._discard_position() + offset, rotation, 10 + _game._discard_views.size())
+	view.play_to(_game._discard_position() + offset, rotation, view.rest_z)
 
 	_game._play_cue("card_place", rand_range(0.94, 1.07))
 	var tint = CardTypes.color_value(card.effective_color())
@@ -170,7 +185,16 @@ func _on_event_card_played(event: Dictionary) -> void:
 			_game._play_cue("wild")
 			_game.effects.sparkle(_game._discard_position(), Color(1, 1, 1), 24)
 
-	_cull_discards()
+
+# The pile paints bottom-to-top in PLAY order. Godot breaks z ties in tree
+# (spawn) order, so equal depths - which is what every discard past the sixth
+# used to get - made a freshly played card slide under the card it should have
+# covered. Re-stamping the whole stack on every play keeps the order strict.
+func _stamp_discard_order() -> void:
+	for i in range(_game._discard_views.size()):
+		var view = _game._discard_views[i]
+		if is_instance_valid(view):
+			view.set_rest_z(DrawOrder.discard(i + 1))
 
 
 # Keep only the top few discard views alive; the rest are pure history.
@@ -206,7 +230,14 @@ func _spawn_drawn(player: int, cards: Array, cue: String) -> void:
 			continue
 		var view = _game._spawn_view(card, player != 0)
 		var delay = _game.settings.anim_scale(0.09) * i
-		view.deal_from(_game._deck_position(), _game._anchor_for(player), 0.0, 0, delay)
+		# Drawn cards fly from the deck straight into their fan slot, above
+		# every resting card, exactly like the opening deal.
+		var index = _game.rules.hands[player].find(card)
+		if index < 0:
+			index = 0
+		var slot = _game._fan_slot(player, index)
+		view.set_card_scale(slot["scale"])
+		view.deal_from(_game._deck_position(), slot["position"], slot["rotation"], slot["z"], delay)
 		var timer = _game.get_tree().create_timer(delay)
 		timer.connect("timeout", _game, "_play_cue", [cue])
 
@@ -308,6 +339,7 @@ func _on_event_recycled(_event: Dictionary) -> void:
 		var oldest = _game._discard_views.pop_front()
 		if is_instance_valid(oldest):
 			oldest.fly_out(_game._deck_position())
+	_stamp_discard_order()
 	pulse_deck()
 
 

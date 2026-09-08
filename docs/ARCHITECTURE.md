@@ -133,6 +133,47 @@ The buttons run **down the right edge** rather than across the middle. The
 original horizontal bar sat at y=448 and collided with both the discard row and
 the player's hand at the default resolution.
 
+## Depth is banded, not incidental
+
+`DrawOrder.gd` is the single source of truth for what draws on top of what —
+the vertical counterpart to `TableLayout`. Two axes matter:
+
+1. **CanvasLayers** separate the big strata: the world renders in the implicit
+   layer 0, then the HUD (5), the colour flash (8), the colour picker (15) and
+   the menus (20). No card can ever render above the HUD, and no menu renders
+   under the picker it may be answering.
+2. **z_index bands** order the world. Godot sorts every canvas item in a layer
+   by effective z (a child's z adds to its parent's) and breaks ties in *tree*
+   order — i.e. by spawn order, which is not the order things happened in.
+   Relying on those tie-breaks is how the game shipped with a discard pile that
+   painted in deal order instead of play order.
+
+Each group therefore owns a band that no other group can reach:
+
+```
+  z    0      table felt
+  z   10-14   deck stack (the five face-down backs)
+  z   20-26   discard pile (bottom .. top, re-stamped on every play)
+  z   60-199  resting hand cards (index within the hand, any seat)
+  z  220      cards in transit - dealt, drawn, played, leaving
+  z  240      the hovered card, lifted out of its fan
+  z  280      the dragged card
+  z  320+     particle bursts and floating text
+```
+
+A hand can never hold more cards than the deck contains, so the hand band
+cannot reach the flight band; the clamps in `DrawOrder.hand()` make that
+explicit. Cards *in transit* fly in the flight band above everything at rest
+and settle into their resting band only when the flight lands (`CardView`
+tracks this as `_in_flight`), so a thrown card clears even a 20-card fan on
+its way to the pile, and a dealt card slides off the *top* of the deck rather
+than out from underneath it.
+
+`Tests/TestDrawOrder.gd` recomputes the paint order exactly the way
+`VisualServerCanvas` does (accumulate z down the tree, sort by z, ties in tree
+order) and asserts the band contract across the deal, mid-flight plays, hover,
+drag and pathological hand sizes.
+
 ## Animation
 
 Godot 3.5's `SceneTreeTween` (via `create_tween()`) is used throughout — no
@@ -173,6 +214,7 @@ now have permanent guards:
 | --- | --- | --- |
 | `Tests/TestRules.gd` | Rules engine, AI legality, 100-game soak, card conservation. | ~1 s |
 | `Tests/TestLayout.gd` | Geometry across 7 resolutions, text fit, font glyph coverage. | ~1 s |
+| `Tests/TestDrawOrder.gd` | Canvas strata, z bands, pile play order, flights, hover and drag depth, interrupted-flight healing. | ~20 s |
 | `Tests/TestIntegration.gd` | Boots the real scene: menus, settings, full matches, resizes, teardown. | ~30 s |
 
 ```bash
@@ -188,6 +230,13 @@ geometry to `user://layout_dump.json`, which `Tools/preview_layout.py` renders
 into a PNG mock-up using the real card art. That is how the layout was reviewed
 without a GPU, and it caught clipping and collisions the numeric assertions had
 missed.
+
+`Tests/HangProbe.gd` is the gameplay equivalent: a soak probe that boots the
+real game and plays it like a person — hovering, clicking, dragging,
+misclicking unplayable cards — across opponent counts, animation speeds and
+house rules, watching for wedged turn flow, dead input flags and hand cards
+that end up off-slot, invisible or stuck mid-flight. It found the ghost-card
+hangs described in the production notes; it is run manually, not in CI.
 
 ## Conventions
 

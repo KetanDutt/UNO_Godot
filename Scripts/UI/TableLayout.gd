@@ -119,7 +119,6 @@ static func metrics(viewport: Vector2, opponent_count: int = 1) -> Dictionary:
 	var opponent_scale = opponent_card_scale(viewport)
 
 	var player_card = card_size(player_scale)
-	var opponent_card = card_size(opponent_scale)
 
 	var player_half = rotated_half_height(player_scale)
 	var opponent_half = rotated_half_height(opponent_scale)
