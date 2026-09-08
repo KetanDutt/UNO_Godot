@@ -89,6 +89,7 @@ object.
 | `ThemeFactory.gd` | Fonts, colour tokens and `StyleBox`es. One place to restyle the whole UI. |
 | `EffectsDirector.gd` | Pooled particles, floating text, screen shake, flashes, the table vignette. |
 | `ReactionDirector.gd` | Delayed opponent reactions: UNO-catch windows and AI jump-ins. See below. |
+| `InputRouter.gd` | Input routing: D-pad/hotkey/pad predicates and the two-zone selection model (hand and action buttons) that carries the whole game on a TV remote. |
 
 ### `Scripts/UI` — presentation
 
@@ -107,6 +108,31 @@ Owns the scene, the systems and the input handling; drives the turn loop. It is
 the only script that both reads rules state and touches nodes, which is exactly
 why the event handling was moved out into `EventPresenter` — the controller was
 otherwise heading past 1300 lines.
+
+## Input: InputRouter and the two-zone model
+
+`GameController._unhandled_input` is a one-liner that delegates to
+`InputRouter.handle(event)`. The router owns:
+
+- the event predicates (`_is_left/_is_right/_is_up/_is_down/_is_accept/...`,
+  including analogue-stick re-press locks so one deflection is one event), and
+- a **two-zone selection model**: the hand is one selection list (left/right
+  moves the chosen card, Enter plays it), the action buttons the other
+  (up/down cycles, Enter activates, up from the top button returns to the
+  hand). Up or down switches zones.
+
+The point is input-device independence: a TV remote (Android TV / Fire TV) has
+only a D-pad, Select and Back, so *every* gameplay action must be reachable
+without hotkeys — the two-zone model puts DRAW/PASS/UNO/CATCH/SORT/MENU one
+up-press away from the hand. When the player has nothing playable, the router
+auto-selects DRAW. Menus and the colour picker do not go through the router at
+all: they use the engine's own Control focus system, which the remote's D-pad
+drives natively.
+
+`_can_interact()` on the controller decides *whether* input is live. While an
+opponent is mid-think (`_busy`), interaction is still allowed when a legal
+jump-in twin exists — beating the AI to the click is the entire point of the
+rule; `_try_play()` rejects everything else with a shake.
 
 ## Delayed reactions: ReactionDirector
 
@@ -245,7 +271,7 @@ now have permanent guards:
 | Suite | Scope | Runtime |
 | --- | --- | --- |
 | `Tests/TestRules.gd` | Rules engine, AI legality, jump-in semantics, 100-game soak, card conservation. | ~1 s |
-| `Tests/TestLayout.gd` | Geometry across 7 resolutions, text fit, font glyph coverage. | ~1 s |
+| `Tests/TestLayout.gd` | Geometry across 7 resolutions, text fit, font glyph coverage, turn-ring clearance. | ~1 s |
 | `Tests/TestDrawOrder.gd` | Canvas strata, z bands, pile play order, flights, hover and drag depth, interrupted-flight healing. | ~20 s |
 | `Tests/TestIntegration.gd` | Boots the real scene: menus, settings, full matches, human and AI jump-ins, the catch window, resizes, teardown. | ~35 s |
 

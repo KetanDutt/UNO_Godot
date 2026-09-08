@@ -15,6 +15,7 @@ const CardTypes = preload("res://Scripts/Core/CardTypes.gd")
 const CardData = preload("res://Scripts/Core/CardData.gd")
 const GameRules = preload("res://Scripts/Core/GameRules.gd")
 const AIPlayer = preload("res://Scripts/Core/AIPlayer.gd")
+const PlayerIdentity = preload("res://Scripts/Core/PlayerIdentity.gd")
 
 const CardView = preload("res://Scripts/UI/CardView.gd")
 const TableLayout = preload("res://Scripts/UI/TableLayout.gd")
@@ -29,6 +30,8 @@ const SettingsManager = preload("res://Scripts/Systems/SettingsManager.gd")
 const EffectsDirector = preload("res://Scripts/Systems/EffectsDirector.gd")
 const ThemeFactory = preload("res://Scripts/Systems/ThemeFactory.gd")
 const ReactionDirector = preload("res://Scripts/Systems/ReactionDirector.gd")
+const TurnRing = preload("res://Scripts/UI/TurnRing.gd")
+const InputRouter = preload("res://Scripts/Systems/InputRouter.gd")
 
 const ASSET_DIR = "res://Assets/Uno Game Assets/"
 
@@ -59,6 +62,15 @@ var presenter = null
 # Delayed opponent reactions (UNO-catch windows, AI jump-ins).
 var reactions = null
 
+# Turn-direction ring circling the discard pile.
+var _turn_ring: Node2D = null
+
+# D-pad/remote input routing and the two-zone selection model.
+var input_router = null
+
+# Seeded once per match; drives both the deck shuffle and the CPU identities.
+var _match_seed: int = 0
+
 var _busy: bool = false
 
 # Safety net: if an AI turn is ever dropped (a timer lost to a scene rebuild,
@@ -72,7 +84,6 @@ var _catch_available: bool = false
 var _catch_target: int = -1
 var _pending_wild_card = null
 var _last_viewport_size: Vector2 = Vector2.ZERO
-var _joy_axis_lock: int = 0
 var _theme: Theme = null
 var _theme_high_contrast: bool = false
 var _drop_zone_radius: float = 150.0
@@ -117,12 +128,19 @@ func _setup_systems() -> void:
 	# Delayed opponent reactions: UNO-catch windows and AI jump-ins.
 	reactions = ReactionDirector.new(self)
 
+	# Input routing: D-pad zones, hotkeys, remote support.
+	input_router = InputRouter.new(self)
+
 
 func _setup_scene() -> void:
 	# Everything that should shake lives under this node.
 	_shake_root = Node2D.new()
 	_shake_root.name = "ShakeRoot"
 	add_child(_shake_root)
+
+	# The turn-direction ring lives on the felt, circling the discard pile.
+	_turn_ring = TurnRing.new()
+	_shake_root.add_child(_turn_ring)
 
 	_table = Sprite.new()
 	_table.name = "Table"
@@ -316,6 +334,13 @@ func _pulse_deck() -> void:
 	presenter.pulse_deck()
 
 
+# A quick swell of the turn ring - fired on every turn hand-off so the eye
+# catches who plays next.
+func pulse_turn_ring() -> void:
+	if _turn_ring != null:
+		_turn_ring.pulse()
+
+
 # ---------------------------------------------------------------------------
 # Match lifecycle
 # ---------------------------------------------------------------------------
@@ -353,12 +378,16 @@ func _start_match() -> void:
 	ruleset.target_score = settings.target_score
 
 	var player_count = settings.opponent_count + 1
-	rules = GameRules.new(player_count, ruleset)
+	_match_seed = randi()
+	rules = GameRules.new(player_count, ruleset, _match_seed)
 
-	# Name the seats: you plus however many CPUs.
+	# Name the seats: you plus a seeded pick of named, avatar'd opponents.
+	# The seed matches the deck, so a match always fields the same table.
 	rules.player_names[0] = "You"
+	var cpu_names = PlayerIdentity.pick_names(player_count - 1, _match_seed)
+	var cpu_avatars = PlayerIdentity.pick_avatars(player_count - 1, _match_seed)
 	for i in range(1, player_count):
-		rules.player_names[i] = "CPU %d" % i if player_count > 2 else "CPU"
+		rules.player_names[i] = cpu_names[i - 1]
 
 	ai_players.clear()
 	for i in range(1, player_count):
@@ -366,7 +395,9 @@ func _start_match() -> void:
 		ai.reset_memory(player_count)
 		ai_players.append(ai)
 
-	hud.setup_seats(rules.player_names)
+	var avatar_keys = [PlayerIdentity.PLAYER_AVATAR]
+	avatar_keys.append_array(cpu_avatars)
+	hud.setup_seats(rules.player_names, avatar_keys)
 	settings.stat_games_played += 1
 	settings.save_settings()
 
@@ -518,6 +549,8 @@ func _begin_turn() -> void:
 
 	if player == 0:
 		_busy = false
+		if input_router != null:
+			input_router.reset_to_hand()
 		var legal = rules.playable_cards(0).size()
 		if rules.pending_draw > 0:
 			hud.set_status("You must answer the +%d or draw it." % rules.pending_draw)
@@ -526,6 +559,10 @@ func _begin_turn() -> void:
 		else:
 			hud.set_status("Your turn - no legal card. Draw from the deck.")
 		_play_cue("turn")
+		if legal == 0 and rules.can_draw(0):
+			# Nothing to play: put the remote selection straight on DRAW.
+			if input_router != null:
+				input_router.enter_button_zone()
 	else:
 		_busy = true
 		hud.set_status("%s is thinking..." % rules.player_names[player])
@@ -633,11 +670,17 @@ func _can_act() -> bool:
 
 
 # Wider gate used for card interaction: with the jump-in house rule on, an
-# exact twin of the top discard is playable even off-turn. Legality itself is
-# still decided by the rules engine in _try_play().
+# exact twin of the top discard is playable even off-turn - INCLUDING while an
+# opponent is mid-think, because beating them to the click is the whole point
+# of the rule. Everything else is rejected by _try_play() with a shake.
 func _can_interact() -> bool:
-	return rules != null and rules.round_active and not _busy \
-		and not menus.is_open() and not color_picker.is_open()
+	if rules == null or not rules.round_active:
+		return false
+	if menus.is_open() or color_picker.is_open():
+		return false
+	if not _busy:
+		return true
+	return rules.rules.jump_in and rules.jump_in_cards(0).size() > 0
 
 
 # ---------------------------------------------------------------------------
@@ -794,6 +837,8 @@ func _toggle_pause() -> void:
 func _on_resume_game() -> void:
 	menus.hide_all()
 	get_tree().paused = false
+	if input_router != null:
+		input_router.reset_to_hand()
 	_refresh_all()
 
 
@@ -884,6 +929,22 @@ func _refresh_hud() -> void:
 			rules.current_player == i and rules.round_active,
 			rules.hand_size(i) == 1)
 
+	# The turn ring follows the pile: position, radius, direction and the
+	# active colour all come from the live rules state.
+	if _turn_ring != null:
+		_turn_ring.visible = rules.round_active
+		if rules.round_active:
+			_turn_ring.position = _discard_position()
+			_turn_ring.set_radius(TableLayout.turn_ring_radius(size))
+			_turn_ring.set_direction(rules.direction)
+			_turn_ring.set_ring_color(CardTypes.color_value(rules.active_color))
+			_turn_ring.configure(settings)
+
+	# Keep the remote/keyboard button selection pointing at a real button now
+	# that the enabled states are fresh.
+	if input_router != null:
+		input_router.apply_button_selection()
+
 
 # ---------------------------------------------------------------------------
 # Input
@@ -909,40 +970,10 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event) -> void:
-	# Release the analogue stick lock when it returns to centre.
-	if event is InputEventJoypadMotion and event.axis == 0 and abs(event.axis_value) < 0.35:
-		_joy_axis_lock = 0
-		return
-
-	if _is_cancel(event):
-		_handle_cancel()
+	# All routing lives in InputRouter (see Scripts/Systems/InputRouter.gd);
+	# it owns the remote-friendly two-zone selection model.
+	if input_router != null and input_router.handle(event):
 		get_tree().set_input_as_handled()
-		return
-
-	if menus.is_open() or color_picker.is_open():
-		return
-	if not _can_interact():
-		return
-
-	if _is_left(event):
-		_move_selection(-1)
-	elif _is_right(event):
-		_move_selection(1)
-	elif _is_accept(event):
-		_play_selected()
-	elif _is_key(event, KEY_D) or _is_pad(event, JOY_XBOX_X):
-		_on_draw_pressed()
-	elif _is_key(event, KEY_P) or _is_pad(event, JOY_XBOX_Y):
-		_on_pass_pressed()
-	elif _is_key(event, KEY_U) or _is_pad(event, JOY_R):
-		_on_uno_pressed()
-	elif _is_key(event, KEY_C):
-		_on_catch_pressed()
-	elif _is_key(event, KEY_S) or _is_pad(event, JOY_L):
-		_on_sort_pressed()
-	else:
-		return
-	get_tree().set_input_as_handled()
 
 
 func _handle_cancel() -> void:
@@ -958,60 +989,6 @@ func _handle_cancel() -> void:
 				_on_resume_game()
 		return
 	_toggle_pause()
-
-
-func _is_pressed(event) -> bool:
-	if event is InputEventKey:
-		return event.pressed and not event.echo
-	if event is InputEventJoypadButton:
-		return event.pressed
-	return false
-
-
-func _is_key(event, scancode: int) -> bool:
-	return event is InputEventKey and event.pressed and not event.echo and event.scancode == scancode
-
-
-func _is_pad(event, button: int) -> bool:
-	return event is InputEventJoypadButton and event.pressed and event.button_index == button
-
-
-func _is_left(event) -> bool:
-	if event is InputEventJoypadMotion:
-		if event.axis == 0 and event.axis_value < -0.7 and _joy_axis_lock != -1:
-			_joy_axis_lock = -1
-			return true
-		return false
-	return _is_pressed(event) and event.is_action_pressed("ui_left")
-
-
-func _is_right(event) -> bool:
-	if event is InputEventJoypadMotion:
-		if event.axis == 0 and event.axis_value > 0.7 and _joy_axis_lock != 1:
-			_joy_axis_lock = 1
-			return true
-		return false
-	return _is_pressed(event) and event.is_action_pressed("ui_right")
-
-
-func _is_accept(event) -> bool:
-	if not _is_pressed(event):
-		return false
-	if event.is_action_pressed("ui_accept"):
-		return true
-	if event is InputEventKey and event.scancode == KEY_SPACE:
-		return true
-	return event is InputEventJoypadButton and event.button_index == JOY_XBOX_A
-
-
-func _is_cancel(event) -> bool:
-	if not _is_pressed(event):
-		return false
-	if event is InputEventKey and event.scancode == KEY_ESCAPE:
-		return true
-	if event is InputEventJoypadButton:
-		return event.button_index == JOY_XBOX_B or event.button_index == JOY_START
-	return false
 
 
 func _move_selection(direction: int) -> void:

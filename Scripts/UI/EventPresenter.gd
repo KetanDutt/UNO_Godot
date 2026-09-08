@@ -131,8 +131,9 @@ func _reveal_opening(view) -> void:
 	# The round can end (or restart) before this timer fires.
 	if not is_instance_valid(view):
 		return
-	view.discard_offset = Vector2(rand_range(-6, 6), rand_range(-4, 4))
-	view.play_to(_game._discard_position() + view.discard_offset, rand_range(-6, 6), view.rest_z)
+	view.set_card_scale(TableLayout.player_card_scale(_game._viewport_size()))
+	view.discard_offset = Vector2(rand_range(-11, 11), rand_range(-8, 8))
+	view.play_to(_game._discard_position() + view.discard_offset, rand_range(-13, 13), view.rest_z)
 	view.flip_to(true)
 	_game._play_cue("card_flip")
 	_game._play_cue("card_place")
@@ -160,9 +161,13 @@ func _on_event_card_played(event: Dictionary) -> void:
 	_cull_discards()
 	_stamp_discard_order()
 
-	# Rotate each discard slightly so the pile looks hand-stacked.
-	var rotation = rand_range(-9, 9)
-	var offset = Vector2(rand_range(-9, 9), rand_range(-7, 7))
+	# The pile is one place with one scale: an opponent's card must not land
+	# smaller than yours just because opponent hands render smaller. Re-base
+	# the view's scale to the discard scale before the throw.
+	view.set_card_scale(TableLayout.player_card_scale(_game._viewport_size()))
+	# Rotate and nudge each discard so the pile looks hand-stacked.
+	var rotation = rand_range(-13, 13)
+	var offset = Vector2(rand_range(-11, 11), rand_range(-8, 8))
 	view.discard_offset = offset
 	view.set_playable(false)
 	view.set_focused(false)
@@ -299,6 +304,7 @@ func on_color_selected(color: int) -> void:
 func _on_event_turn_changed(_event: Dictionary) -> void:
 	_game._selected_index = 0
 	_game.hud.set_direction(_game.rules.direction)
+	_game.pulse_turn_ring()
 
 
 func _on_event_reversed(event: Dictionary) -> void:

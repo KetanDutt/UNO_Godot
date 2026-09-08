@@ -35,6 +35,14 @@ not respond to a click beyond a short shake.
 
 You can play a card by clicking it, or by dragging it onto the discard pile.
 
+## The opponents
+
+Each match deals you a table of named, avatar'd opponents drawn from a roster —
+Hugo the owl, Kira the robot, Bruno the cat and friends. Who you get is seeded
+with the match, so the same table stays put for the whole match. They talk in
+the status line ("Hugo is thinking…"), show their portrait on the seat plate
+next to their card count, and their skill is set by the difficulty below.
+
 ## Card values
 
 | Card | Effect | Score |
@@ -138,17 +146,29 @@ than instant. That delay obeys the animation speed setting.
 
 ## Controls
 
-| Action | Mouse / touch | Keyboard | Gamepad |
-| --- | --- | --- | --- |
-| Play a card | Click, or drag to the pile | `←` `→` to select, `Enter`/`Space` to play | D-pad or stick, `A` |
-| Draw | Click the draw pile | `D` | `X` |
-| Pass | Click **PASS** | `P` | `Y` |
-| Call UNO | Click **UNO!** | `U` | `RB` |
-| Catch a missed UNO | Click **CATCH!** | `C` | — |
-| Sort your hand | Click **SORT** | `S` | `LB` |
-| Pause / back | Click **MENU** | `Esc` | `B` or `Start` |
+| Action | Mouse / touch | Keyboard | Gamepad | TV remote |
+| --- | --- | --- | --- | --- |
+| Play a card | Click, or drag to the pile | `←` `→` to select, `Enter`/`Space` to play | D-pad or stick, `A` | `←` `→`, then `Select` |
+| Use an action button | Click it | `↑`/`↓` to focus, `Enter` to press, `↑` again to return to the hand | D-pad, `A` | `↑` opens the buttons, `↑`/`↓` cycles, `Select` presses |
+| Draw | Click the draw pile | `D` | `X` | via **DRAW** button |
+| Pass | Click **PASS** | `P` | `Y` | via button |
+| Call UNO | Click **UNO!** | `U` | `RB` | via button |
+| Catch a missed UNO | Click **CATCH!** | `C` | — | via button |
+| Sort your hand | Click **SORT** | `S` | `LB` | via button |
+| Choose a wild colour | Click the colour | `←` `→`, `Enter` | D-pad, `A` | D-pad, `Select` |
+| Pause / back | Click **MENU** | `Esc` | `B` or `Start` | `Back` |
 
-Menus are fully keyboard and gamepad navigable.
+**Playing on Android TV or Fire TV.** The game is fully playable with nothing
+but the remote's D-pad, Select and Back — no touch, no mouse. Menus and the
+colour picker move focus with the D-pad; during a hand, `↑` jumps from your
+cards to the action buttons (marked with a glowing strip) and `↑` from the top
+button returns to your hand. When you have nothing playable, the selection
+starts on **DRAW** for you. `Back` pauses during play and goes back inside
+menus.
+
+The turn direction is shown by the coloured ring spinning around the discard
+pile — it turns the way play passes and pulses when the turn changes. The
+active seat's name plate is highlighted too.
 
 ## Statistics
 

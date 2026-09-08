@@ -436,10 +436,14 @@ func play_to(target: Vector2, target_rotation: float, z: int,
 		.set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
 	_move_tween.tween_property(self, "rotation_degrees", target_rotation, duration) \
 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	# Lift then settle sells the "throw" onto the pile.
+	# Lift, then squash on landing: the card hits the pile, dips and settles
+	# back to its rest scale. The squash sells the impact far better than a
+	# plain ease-out.
 	_move_tween.tween_property(self, "scale", _base() * 1.16, duration * 0.45) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	_move_tween.chain().tween_property(self, "scale", _base(), duration * 0.5) \
+	_move_tween.chain().tween_property(self, "scale", _base() * Vector2(1.06, 0.93), duration * 0.22) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_move_tween.chain().tween_property(self, "scale", _base(), duration * 0.3) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_move_tween.chain().tween_callback(self, "_settle")
 	if on_complete_target != null and on_complete_method != "":

@@ -15,6 +15,8 @@ jump-in), three AI difficulties, match scoring, and a full accessibility pass.
 - The full 108-card deck, all action cards, and correct two-player Reverse.
 - 2–4 players, match scoring to a configurable target, round summaries with a
   per-round point breakdown.
+- Named, avatar'd opponents — Hugo the owl, Kira the robot and the rest of the
+  roster — seeded per match, with portraits on their seat plates.
 - Three AI difficulties. Hard tracks which colours you are void in, holds
   Wild Draw Four for the moment it hurts most, and never misses a catch.
 - House rules: stacking Draw Twos, draw-until-playable, Seven-Zero, force-play
@@ -41,13 +43,14 @@ jump-in), three AI difficulties, match scoring, and a full accessibility pass.
   time, and menu delays.
 - Colour-blind markers, live high-contrast theming, and independent toggles for
   screen shake and particles.
-- Full keyboard and gamepad navigation everywhere.
+- Full keyboard and gamepad navigation everywhere — and complete Android TV /
+  Fire TV support: the whole game plays with just a D-pad, Select and Back.
 
 **Engineering**
 
 - The rules engine has no dependency on the scene tree, so it is tested headless
   in about a second.
-- 3154 assertions across four suites, running in CI on every push.
+- 3208 assertions across four suites, running in CI on every push.
 - All on-screen geometry is computed in one place and verified at seven
   resolutions.
 
@@ -68,9 +71,9 @@ Or open the folder in the Godot 3.x editor and press play. The main scene is
 
 ```bash
 godot --no-window -s Tests/TestRules.gd         # 389 assertions, ~1s
-godot --no-window -s Tests/TestLayout.gd        # 2644 assertions, ~1s
+godot --no-window -s Tests/TestLayout.gd        # 2679 assertions, ~1s
 godot --no-window -s Tests/TestDrawOrder.gd     # 51 assertions, ~15s
-godot --no-window -s Tests/TestIntegration.gd   # 70 assertions, ~35s
+godot --no-window -s Tests/TestIntegration.gd   # 89 assertions, ~35s
 ```
 
 `TestIntegration` boots the real game scene and drives it through menus,
@@ -88,16 +91,20 @@ gdlint Scripts/ Tests/
 
 ## Controls
 
-| Action | Mouse / touch | Keyboard | Gamepad |
-| --- | --- | --- | --- |
-| Play a card | Click, or drag to the pile | `←` `→`, then `Enter` | Stick / D-pad, `A` |
-| Draw | Click the draw pile | `D` | `X` |
-| Pass | **PASS** | `P` | `Y` |
-| Call UNO | **UNO!** | `U` | `RB` |
-| Catch a missed UNO | **CATCH!** | `C` | — |
-| Sort hand | **SORT** | `S` | `LB` |
-| Jump in (house rule) | Click the twin card | `←` `→`, then `Enter` | Stick, `A` |
-| Pause | **MENU** | `Esc` | `B` / `Start` |
+| Action | Mouse / touch | Keyboard | Gamepad | TV remote |
+| --- | --- | --- | --- | --- |
+| Play a card | Click, or drag to the pile | `←` `→`, then `Enter` | Stick / D-pad, `A` | `←` `→`, then `Select` |
+| Action buttons | Click | `↑`/`↓` to focus, `Enter` to press | D-pad, `A` | `↑` opens the buttons, `Select` presses |
+| Draw | Click the draw pile | `D` | `X` | via **DRAW** |
+| Pass | **PASS** | `P` | `Y` | via button |
+| Call UNO | **UNO!** | `U` | `RB` | via button |
+| Catch a missed UNO | **CATCH!** | `C` | — | via button |
+| Sort hand | **SORT** | `S` | `LB` | via button |
+| Jump in (house rule) | Click the twin card | `←` `→`, then `Enter` | Stick, `A` | `←` `→`, `Select` |
+| Pause / back | **MENU** | `Esc` | `B` / `Start` | `Back` |
+
+Everything — menus, settings, the colour picker, the hand, every action button
+— is reachable with a TV remote's D-pad, Select and Back alone.
 
 Full rules, every setting, and the difficulty breakdown are in
 [docs/GAMEPLAY.md](docs/GAMEPLAY.md).
@@ -117,16 +124,19 @@ Scripts/
     Deck.gd            108-card deck, seeded shuffle, recycling
     GameRules.gd       Turn state machine and the semantic event queue
     AIPlayer.gd        Opponent decisions, including jump-in reflexes
+    PlayerIdentity.gd  Seeded opponent names and avatar assignment
   Systems/
     SettingsManager.gd Versioned config in user://settings.cfg
     AudioDirector.gd   Runtime-synthesised SFX and music
     ThemeFactory.gd    Fonts, colour tokens, styleboxes
     EffectsDirector.gd Pooled particles, floating text, shake, vignette
     ReactionDirector.gd Delayed opponent reactions: catch windows, AI jump-ins
+    InputRouter.gd     D-pad zones and hotkeys; carries the game on a TV remote
   UI/
     TableLayout.gd     All on-screen geometry, as pure functions
     EventPresenter.gd  Turns rules events into animation and sound
     CardView.gd        One card on screen
+    TurnRing.gd        Spinning direction indicator around the discard pile
     HudLayer.gd        Status, counters, scoreboard, seat plates, buttons
     MenuLayer.gd       Main / pause / settings / help / stats / summaries
     ColorPicker.gd     Wild-card colour overlay
@@ -149,6 +159,11 @@ Because state is final before any tween begins, the presentation can be sped up,
 slowed down or skipped entirely without the simulation ever disagreeing with
 what is on screen. It is also why the rules can be soak-tested for 100 games in
 about a second with no window open.
+
+Input takes a similar shape: `InputRouter` owns a two-zone selection model (your
+hand, and the action buttons) so that every action is reachable from a TV
+remote's D-pad, Select and Back — the same code path the keyboard and gamepad
+use.
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) goes into detail.
 

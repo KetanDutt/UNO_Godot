@@ -4,6 +4,53 @@ All notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 version lives in `project.godot` (`application/config/version`).
 
+## [1.2.0] — 2026-09-08
+
+### Added
+
+- **Android TV / Fire TV support.** The whole game is playable with nothing
+  but a remote's D-pad, Select and Back — no touch, no mouse, no hotkeys.
+  During a hand, Up jumps between your cards and the action buttons (the
+  selected button wears a glowing accent strip); Enter activates it; Back
+  pauses. When nothing is playable the selection starts on DRAW. Menus and
+  the colour picker already spoke the engine's focus system, which the remote
+  drives natively. All routing lives in a new `InputRouter` system, shared by
+  keyboard and gamepad.
+- **Named, avatar'd opponents.** Each match seeds a table from a roster
+  (Hugo the owl, Kira the robot, Bruno the cat…) with generated portrait art
+  on the seat plates. The seed matches the deck, so a match always fields the
+  same table.
+- **A real turn-direction indicator**: a coloured ring spinning around the
+  discard pile in the direction play actually passes, pulsing on every
+  hand-off and flipping on a Reverse. The old guilmet in the status bar
+  stays as a secondary marker.
+- Juice: cards squash on landing on the pile, the active seat plate pops when
+  it takes the turn, and pile throws carry a slightly bolder hand-stacked
+  rotation.
+
+### Fixed
+
+- **The center pile mixed card sizes**: a card played onto the pile kept the
+  scale of the hand it came from, so your discards landed bigger than the
+  CPU's (and vice versa). Every discard now re-bases to one pile scale, with a
+  random tilt and offset so the pile reads as hand-stacked.
+- **Jump-ins were unreachable through real input**: while an opponent was
+  "thinking" — the only window a jump-in exists — all input was gated off, so
+  the feature could never fire from a real click or keypress. Interaction is
+  now live while busy whenever a legal twin is in your hand.
+- Removed the five `game_*` input actions from project.godot: nothing read
+  them (the router reads raw keys/pads), so editing those bindings silently
+  did nothing.
+
+### Changed
+
+- Version 1.2.0; the README table preview was re-rendered through the layout
+  pipeline with the new ring, avatars and seat plates.
+- Test bed grows to 3208 assertions: turn-ring geometry in `TestLayout`, and
+  an opponents/pile/remote group in `TestIntegration` (named seats, avatars,
+  uniform pile scale, varied rotation, ring direction, the D-pad zone dance,
+  drawing via the focused button).
+
 ## [1.1.0] — 2026-09-08
 
 ### Added

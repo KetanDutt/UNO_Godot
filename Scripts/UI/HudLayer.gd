@@ -16,6 +16,7 @@ signal menu_pressed
 signal catch_pressed
 
 const CardTypes = preload("res://Scripts/Core/CardTypes.gd")
+const PlayerIdentity = preload("res://Scripts/Core/PlayerIdentity.gd")
 const ThemeFactory = preload("res://Scripts/Systems/ThemeFactory.gd")
 const TableLayout = preload("res://Scripts/UI/TableLayout.gd")
 const DrawOrder = preload("res://Scripts/UI/DrawOrder.gd")
@@ -41,7 +42,15 @@ var _menu_button: Button = null
 var _catch_button: Button = null
 
 var _seat_plates: Array = []
+var _seat_active: Array = []
+var _seat_pop: SceneTreeTween = null
 var _button_bar: VBoxContainer = null
+
+# Remote/keyboard selection of the action buttons: index into get_buttons(),
+# -1 when the buttons are not selected. Mirrors the card selection model.
+var _button_selection: int = -1
+var _selection_strips: Array = []
+var _button_pop: SceneTreeTween = null
 
 var _status_tween = null
 var _chip_tween = null
@@ -164,12 +173,13 @@ func _build_scoreboard(root: Control) -> void:
 	root.add_child(_score_label)
 
 
-# Create one floating name plate per seat.
-func setup_seats(names: Array) -> void:
+# Create one floating name plate per seat: an avatar and the player's name.
+func setup_seats(names: Array, avatar_keys: Array = []) -> void:
 	for plate in _seat_plates:
 		if is_instance_valid(plate["panel"]):
 			plate["panel"].queue_free()
 	_seat_plates.clear()
+	_seat_active.clear()
 
 	var root = get_node("Root")
 	for i in range(names.size()):
@@ -184,13 +194,31 @@ func setup_seats(names: Array) -> void:
 		panel.add_stylebox_override("panel", box)
 		root.add_child(panel)
 
+		var row = HBoxContainer.new()
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_constant_override("separation", 7)
+		panel.add_child(row)
+
+		var avatar = TextureRect.new()
+		avatar.name = "Avatar"
+		avatar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		avatar.rect_min_size = Vector2(24, 24)
+		avatar.expand = true
+		avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		if i < avatar_keys.size():
+			avatar.texture = load(PlayerIdentity.avatar_path(avatar_keys[i]))
+		row.add_child(avatar)
+
 		var label = Label.new()
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		label.align = Label.ALIGN_CENTER
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		label.add_font_override("font", ThemeFactory.make_font(15, "bold"))
-		panel.add_child(label)
+		row.add_child(label)
 
-		_seat_plates.append({"panel": panel, "label": label, "box": box})
+		_seat_plates.append({"panel": panel, "label": label, "box": box,
+			"avatar": avatar, "has_avatar": avatar.texture != null})
+		_seat_active.append(false)
 
 
 # Move a seat plate to a screen position and refresh its contents.
@@ -203,9 +231,11 @@ func update_seat(index: int, position: Vector2, text: String, active: bool, dang
 	var box = plate["box"]
 
 	label.text = text
-	var width = max(132.0, label.get_font("font").get_string_size(text).x + 36.0)
-	panel.rect_size = Vector2(width, 32)
-	panel.rect_position = position - Vector2(width * 0.5, 16)
+	# The avatar adds a fixed chunk next to the name.
+	var extras = 64.0 if plate["has_avatar"] else 36.0
+	var width = max(132.0, label.get_font("font").get_string_size(text).x + extras)
+	panel.rect_size = Vector2(width, 34)
+	panel.rect_position = position - Vector2(width * 0.5, 17)
 
 	var border = Color(1, 1, 1, 0.10)
 	if danger:
@@ -215,6 +245,20 @@ func update_seat(index: int, position: Vector2, text: String, active: bool, dang
 	box.border_color = border
 	box.bg_color = Color(0.10, 0.12, 0.18, 0.93) if active else Color(0.05, 0.06, 0.09, 0.80)
 	label.add_color_override("font_color", Color(1, 1, 1) if active else Color(0.76, 0.79, 0.86))
+
+	# A seat taking the turn pops - with random opponent names and avatars the
+	# plates now carry identity, so the hand-off deserves to be legible.
+	if active and not _seat_active[index]:
+		if _seat_pop != null and _seat_pop.is_valid():
+			_seat_pop.kill()
+		panel.rect_pivot_offset = panel.rect_size * 0.5
+		var d = settings.anim_scale(0.32) if settings != null else 0.32
+		_seat_pop = create_tween()
+		_seat_pop.tween_property(panel, "rect_scale", Vector2(1.16, 1.16), d * 0.4) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		_seat_pop.tween_property(panel, "rect_scale", Vector2.ONE, d * 0.6) \
+			.set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	_seat_active[index] = active
 
 
 # --- action buttons --------------------------------------------------------
@@ -242,9 +286,25 @@ func _build_buttons(root: Control) -> void:
 	_menu_button.name = "MenuButton"
 	_menu_button.text = "MENU"
 	_menu_button.hint_tooltip = "Pause  (Esc)"
-	_menu_button.focus_mode = Control.FOCUS_ALL
+	_menu_button.focus_mode = Control.FOCUS_NONE
 	_menu_button.connect("pressed", self, "_on_button", ["menu_pressed"])
 	root.add_child(_menu_button)
+
+	# A visible accent strip on whichever button the remote selection points at.
+	for button in get_buttons():
+		var strip = ColorRect.new()
+		strip.name = "FocusStrip"
+		strip.color = ThemeFactory.ACCENT
+		strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		strip.anchor_top = 0.0
+		strip.anchor_bottom = 1.0
+		strip.margin_left = 3
+		strip.margin_right = 7
+		strip.margin_top = 5
+		strip.margin_bottom = -5
+		strip.visible = false
+		button.add_child(strip)
+		_selection_strips.append(strip)
 
 
 func _make_action_button(text: String, tooltip: String, signal_name: String) -> Button:
@@ -252,7 +312,10 @@ func _make_action_button(text: String, tooltip: String, signal_name: String) -> 
 	button.name = text.replace("!", "") + "Button"
 	button.text = text
 	button.hint_tooltip = tooltip
-	button.focus_mode = Control.FOCUS_ALL
+	# No engine focus: during play the D-pad drives a custom two-zone
+	# selection (cards <-> buttons) instead, and a focused button would
+	# swallow Enter presses meant for the hand.
+	button.focus_mode = Control.FOCUS_NONE
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.connect("pressed", self, "_on_button", [signal_name])
 	_button_bar.add_child(button)
@@ -280,6 +343,50 @@ func _on_button(signal_name: String) -> void:
 
 func get_buttons() -> Array:
 	return [_draw_button, _pass_button, _uno_button, _catch_button, _sort_button, _menu_button]
+
+
+func seat_avatar_texture(index: int):
+	if index < 0 or index >= _seat_plates.size():
+		return null
+	return _seat_plates[index]["avatar"].texture
+
+
+# --- remote / keyboard button selection ------------------------------------
+# A TV remote has a D-pad and Enter only, so the action buttons join the same
+# kind of selection model the hand uses: one button is marked selected, the
+# controller cycles it and activates it.
+
+func set_button_selection(index: int) -> void:
+	_button_selection = index
+	var buttons = get_buttons()
+	for i in range(buttons.size()):
+		var selected = i == index
+		if _selection_strips.size() > i and _selection_strips[i] != null:
+			_selection_strips[i].visible = selected
+		var button = buttons[i]
+		if button == null:
+			continue
+		if not selected:
+			button.modulate = Color(1, 1, 1)
+			continue
+		button.modulate = Color(1.14, 1.14, 1.14)
+		if _button_pop != null and _button_pop.is_valid():
+			_button_pop.kill()
+		button.rect_pivot_offset = button.rect_size * 0.5
+		var d = settings.anim_scale(0.22) if settings != null else 0.22
+		_button_pop = create_tween()
+		_button_pop.tween_property(button, "rect_scale", Vector2(1.06, 1.06), d * 0.5) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		_button_pop.tween_property(button, "rect_scale", Vector2.ONE, d * 0.5) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func is_button_selectable(index: int) -> bool:
+	var buttons = get_buttons()
+	if index < 0 or index >= buttons.size():
+		return false
+	var button = buttons[index]
+	return button != null and button.visible and not button.disabled
 
 
 # Re-place every widget for the current viewport size. Called on boot and on

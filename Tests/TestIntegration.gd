@@ -12,6 +12,7 @@ extends SceneTree
 
 const CardTypes = preload("res://Scripts/Core/CardTypes.gd")
 const CardData = preload("res://Scripts/Core/CardData.gd")
+const PlayerIdentity = preload("res://Scripts/Core/PlayerIdentity.gd")
 const MenuLayer = preload("res://Scripts/UI/MenuLayer.gd")
 
 var _passed := 0
@@ -58,6 +59,7 @@ func _run_suite() -> void:
 	yield(_test_multiplayer_seats(), "completed")
 	yield(_test_house_rules(), "completed")
 	yield(_test_jump_in_and_catch(), "completed")
+	yield(_test_opponents_and_remote(), "completed")
 	_finish()
 
 
@@ -458,6 +460,142 @@ func _test_jump_in_and_catch() -> void:
 	# Leave the settings clean for any run that follows.
 	_game.settings.rule_jump_in = false
 	_game.settings.difficulty = 1
+	_game.settings.save_settings()
+	_game._on_restart_game()
+	yield(_advance(1.5), "completed")
+
+
+# Named, avatar'd opponents; a uniform discard pile; the turn ring; and the
+# D-pad-only action model that carries the game on a TV remote.
+func _test_opponents_and_remote() -> void:
+	print("\n-- opponents, the pile and the remote --")
+	_game.settings.opponent_count = 2
+	_game.settings.rule_jump_in = false
+	_game.settings.animation_speed = 2.0
+	_game.settings.save_settings()
+
+	_game._on_restart_game()
+	yield(_advance(2.5), "completed")
+	var rules = _game.rules
+
+	# --- Opponent identities -------------------------------------------------
+	_check(rules.player_names[0] == "You", "the human seat is still You")
+	var all_named = true
+	var unique = true
+	var seen = {}
+	for i in range(1, rules.player_count()):
+		var name = rules.player_names[i]
+		if not PlayerIdentity.NAMES.has(name):
+			all_named = false
+		if seen.has(name):
+			unique = false
+		seen[name] = true
+	_check(all_named, "CPU seats drew names from the roster")
+	_check(unique, "no two seats share a name")
+	for i in range(rules.player_count()):
+		_check(_game.hud.seat_avatar_texture(i) != null,
+			"seat %d shows an avatar" % i)
+
+	# --- The discard pile is one size, hand-stacked --------------------------
+	# Stage two deterministic plays (the jump-in group's recipe: retire the
+	# pending think timer, then play a number card from an AI hand) so the
+	# pile holds real played cards from *opponent* hands - the ones that used
+	# to land at the wrong scale. An opponent's card renders at 70% in the
+	# hand; on the pile it must match the human's cards exactly.
+	_game._ai_turn_token += 1
+	var staged_seat = 1
+	while staged_seat <= 2 and _game._discard_views.size() < 3:
+		rules.current_player = staged_seat
+		rules.has_drawn_this_turn = false
+		rules.consume_events()
+		var play = null
+		for card in rules.hands[staged_seat]:
+			if card.is_number() and card.color == rules.active_color:
+				play = card
+				break
+		if play == null:
+			for card in rules.hands[staged_seat]:
+				if card.is_number():
+					rules.active_color = card.color
+					play = card
+					break
+		if play == null:
+			break
+		_strip_exact_copies(rules.hands[0], play)
+		if staged_seat == 1:
+			_strip_exact_copies(rules.hands[2], play)
+		rules.play_card(staged_seat, play)
+		_game._process_events(rules.consume_events())
+		yield(_advance(0.5), "completed")
+		staged_seat += 1
+
+	# Let the last throw land before measuring: a card in transit is still
+	# scaling and rotating towards its rest pose.
+	var views = _game._discard_views
+	for _s in range(60):
+		var any_flying = false
+		for view in views:
+			if is_instance_valid(view) and view.is_in_flight():
+				any_flying = true
+				break
+		if not any_flying:
+			break
+		yield(_advance(0.05), "completed")
+
+	_check(views.size() >= 3, "the pile holds several discards (%d)" % views.size())
+	var uniform_scale = true
+	var rotations_vary = false
+	for i in range(views.size()):
+		if not is_instance_valid(views[i]):
+			continue
+		if abs(views[i].scale.x - views[0].scale.x) > 0.001 \
+				or abs(views[i].scale.y - views[0].scale.y) > 0.001:
+			uniform_scale = false
+		if abs(views[i].rotation_degrees - views[0].rotation_degrees) > 0.5:
+			rotations_vary = true
+	_check(uniform_scale, "every resting discard renders at the same scale")
+	_check(rotations_vary, "pile cards carry varied rotation")
+
+	# --- The turn ring --------------------------------------------------------
+	_check(_game._turn_ring != null and _game._turn_ring.visible,
+		"the turn ring is on the table")
+	_check(_game._turn_ring.direction == rules.direction,
+		"the ring spins the way the turn passes")
+
+	# --- Remote model: D-pad only ---------------------------------------------
+	var router = _game.input_router
+	_check(router != null, "the input router exists")
+	_check(router.zone() == 0, "the selection starts on the hand")
+	router.enter_button_zone()
+	_check(router.zone() == 1, "up/down reaches the action buttons")
+	var first_index = router.button_index()
+	router._cycle_buttons(1)
+	_check(router.button_index() != first_index, "down cycles the buttons")
+	router._cycle_buttons(-1)
+	_check(router.button_index() == first_index, "up cycles back")
+	router._cycle_buttons(-1)
+	_check(router.zone() == 0, "up from the top button returns to the hand")
+
+	# Activating DRAW through the remote path draws a card.
+	rules.current_player = 0
+	rules.has_drawn_this_turn = false
+	rules.consume_events()
+	var hand_before = rules.hands[0].size()
+	_game._ai_turn_token += 1
+	_game._begin_turn()
+	yield(_wait(), "completed")
+	router.enter_button_zone()
+	_check(router.button_index() == 0, "the selection lands on DRAW when stuck")
+	var draw_ok = router.button_index() == 0
+	if draw_ok:
+		router._activate_focused_button()
+		yield(_wait(), "completed")
+		_check(rules.hands[0].size() == hand_before + 1,
+			"Enter on the focused DRAW button draws a card")
+
+	# Leave the tree clean for anything that follows.
+	_game.input_router.reset_to_hand()
+	_game.settings.opponent_count = 1
 	_game.settings.save_settings()
 	_game._on_restart_game()
 	yield(_advance(1.5), "completed")

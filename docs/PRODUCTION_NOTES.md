@@ -51,6 +51,15 @@ headless test suites or the layout preview renderer.
 | **Untracked glow fade fought the pulse** | A slow fade-out tween on the playable glow (started before a refresh) landed its final alpha after a new pulse had begun, dimming a card that was just highlighted. The fade is now tracked per purpose and killed like every other tween. |
 | Dead code | `AudioDirector.play_sequence` (never called), `EffectsDirector._vignette` (declared, never built), a double guard in `CardView.flip_to`. |
 
+### Third pass (v1.2.0)
+
+| Bug | Detail |
+| --- | --- |
+| **Discards kept their hand scale** | A card thrown on the pile tweened to its *hand* scale: the human's discards landed big (player hand scale), opponents' small (70% hand scale) - the pile looked like two different games. Only a window resize ever normalised them. Every discard now re-bases to one pile scale before the throw. |
+| **Jump-ins were unreachable through real input** | `_can_interact()` hard-gated on `not _busy`, and an opponent's think time sets `_busy` - so while anyone else was deciding (the only moment a jump-in is possible), clicks and keypresses were dead. The tests passed because they call `_try_play` directly. Interaction is now allowed while busy when a legal twin exists. |
+| **Dead input actions** | `game_draw`/`game_pass`/`game_uno`/`game_catch`/`game_sort` were defined in project.godot but the code read raw scancodes/pads - editing the bindings changed nothing. Removed. |
+| **Confusing direction glyph** | The turn direction was a guillemet in the status bar; players read it backwards. Replaced with a spinning ring around the discard pile, tinted with the active colour, pulsing on every turn hand-off. |
+
 ## Performance
 
 | Change | Effect |
@@ -79,8 +88,8 @@ headless test suites or the layout preview renderer.
 
 ## Testing
 
-The full bed is 3154 assertions across four suites (389 rules, 2644 layout,
-51 draw order, 70 integration), plus the manual soak probe and layout preview
+The full bed is 3208 assertions across four suites (389 rules, 2679 layout,
+51 draw order, 89 integration), plus the manual soak probe and layout preview
 pipeline described in [TESTING.md](TESTING.md). The v1.1.0 pass added
 jump-in legality/turn-flow/disabled tests to `TestRules` and a whole
 jump-in-and-catch-window group (human jump-in, AI jump-in, UNO button during
@@ -90,16 +99,19 @@ turn-passers (a Skip quietly rewrote the turn order), a helper that stripped
 the very card it was about to play, and — surfacing roughly once in eight
 runs — a racy sample in the draw-order suite that read the top discard's
 depth while an opponent's throw was still in the flight band. The suite now
-waits for pile flights to land before sampling.
+waits for pile flights to land before sampling. The v1.2.0 pass added a
+turn-ring geometry group to `TestLayout` and an opponents/pile/remote group to
+`TestIntegration` (named seats, avatars, uniform pile scale, varied pile
+rotation, ring direction, the full D-pad zone dance, and DRAW-through-Enter).
 
 3150 assertions across four headless suites, all wired into CI:
 
 | Suite | Assertions | Scope |
 | --- | --- | --- |
 | `TestRules.gd` | 389 | Rules engine, AI legality, jump-in semantics, card conservation, 100-game seeded soak. |
-| `TestLayout.gd` | 2644 | Geometry at 7 resolutions × 7 hand sizes, text fit, glyph coverage. |
+| `TestLayout.gd` | 2679 | Geometry at 7 resolutions × 7 hand sizes, text fit, glyph coverage, turn-ring clearance. |
 | `TestDrawOrder.gd` | 51 | Canvas strata, z bands, the pile's play order, cards in transit, hover/drag depth, pathological hand sizes, interrupted-flight healing. |
-| `TestIntegration.gd` | 70 | Boots the real scene: menus, settings, save/reload, full matches, 3- and 4-handed play, house rules, jump-ins, the catch window, resizes, pause, teardown. |
+| `TestIntegration.gd` | 89 | Boots the real scene: menus, settings, save/reload, full matches, 3- and 4-handed play, house rules, jump-ins, the catch window, opponent identities, the discard pile's uniform scale, the turn ring, the remote model, resizes, pause, teardown. |
 
 Every suite exits non-zero on failure. Verified by deliberately introducing a
 failure and confirming the exit code.

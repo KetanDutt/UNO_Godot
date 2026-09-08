@@ -39,7 +39,7 @@ calls and catches, round/match scoring, seven-zero, force-play, jump-in
 legality and turn flow, plus a 100-game seeded soak that asserts card
 conservation and that every match terminates.
 
-### TestLayout.gd — the geometry (2644 assertions, ~1 s)
+### TestLayout.gd — the geometry (2679 assertions, ~1 s)
 
 `TableLayout` is pure functions of the viewport, so the suite can assert at
 seven resolutions × seven hand sizes that bands never overlap, nothing leaves
@@ -56,14 +56,17 @@ play order, cards in transit fly above everything at rest, hover and drag lift
 into their own bands, a 30-card hand cannot reach the flight band, and
 interrupted flights heal (no ghost cards).
 
-### TestIntegration.gd — the whole game (70 assertions, ~35 s)
+### TestIntegration.gd — the whole game (89 assertions, ~35 s)
 
 Boots `Scenes/Gameplay.tscn` and drives it through the same entry points a
 player uses: every menu screen, every settings toggle, a save/reload
 round-trip, complete matches driven through `_try_play` / `_on_draw_pressed` /
 `_on_pass_pressed`, three- and four-handed tables, house rules, window resizes
-mid-round, pause/resume, jump-ins (human *and* AI), the UNO catch window, and a
-clean teardown back to the main menu.
+mid-round, pause/resume, jump-ins (human *and* AI), the UNO catch window,
+opponent identities and avatars, the discard pile's uniform scale and rotation,
+the turn-direction ring, the TV-remote selection model (zone switching, button
+cycling, drawing via Enter on the focused button), and a clean teardown back
+to the main menu.
 
 ## Diagnostics (not run in CI)
 

@@ -65,11 +65,11 @@ const HELP_HOUSE_RULES = \
 	"Jump-in - a card identical to the top of the pile (same colour AND value) may be " + \
 	"played out of turn by anyone, including you. Play then resumes from the jumper."
 const HELP_CONTROLS = \
-	"Mouse / touch - click or drag a card. Hover to preview.\n" + \
-	"Keyboard - Left/Right select, Enter or Space plays, D draws, P passes, U calls UNO, " + \
-	"C catches, S sorts, Esc pauses.\n" + \
-	"Gamepad - D-pad or stick selects, A plays, X draws, Y passes, RB calls UNO, LB " + \
-	"sorts, B or Start pauses."
+	"Remote / gamepad - D-pad moves, Enter or A confirms, Back pauses. In your " + \
+	"hand, Up jumps to the action buttons; Up again returns to your cards.\n" + \
+	"Mouse / touch - click or drag a card onto the pile. Hover to preview.\n" + \
+	"Keyboard - Left/Right select, Enter or Space plays, D draws, P passes, U calls " + \
+	"UNO, C catches, S sorts, Esc pauses."
 
 var current_screen: String = SCREEN_NONE
 
@@ -239,7 +239,7 @@ func _build_main(root: Control) -> void:
 	if OS.get_name() != "HTML5":
 		box.add_child(_make_button("QUIT", "_on_quit_game"))
 
-	var hint = _make_body("Arrows / D-pad to navigate  -  Enter or A to confirm", 14)
+	var hint = _make_body("D-pad to navigate  -  Enter to confirm  -  Back to pause", 14)
 	hint.add_color_override("font_color", ThemeFactory.INK_FAINT)
 	box.add_child(_spacer(6))
 	box.add_child(hint)
