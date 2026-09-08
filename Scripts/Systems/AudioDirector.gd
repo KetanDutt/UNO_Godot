@@ -227,7 +227,6 @@ func _make_card_draw() -> AudioStreamSample:
 	var low = 0.0
 	var prev = 0.0
 	for i in range(count):
-		var t = float(i) / MIX_RATE
 		var progress = float(i) / float(count)
 		var env = sin(PI * progress) * pow(1.0 - progress, 0.7)
 		var white = rng.randf_range(-1.0, 1.0)

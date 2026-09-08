@@ -233,7 +233,6 @@ func _build_buttons(root: Control) -> void:
 	_menu_button.hint_tooltip = "Pause  (Esc)"
 	_menu_button.focus_mode = Control.FOCUS_ALL
 	_menu_button.connect("pressed", self, "_on_button", ["menu_pressed"])
-	_menu_button.connect("mouse_entered", self, "_on_button_hover")
 	root.add_child(_menu_button)
 
 
@@ -245,17 +244,27 @@ func _make_action_button(text: String, tooltip: String, signal_name: String) -> 
 	button.focus_mode = Control.FOCUS_ALL
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.connect("pressed", self, "_on_button", [signal_name])
-	button.connect("mouse_entered", self, "_on_button_hover")
 	_button_bar.add_child(button)
 	return button
 
 
 func _on_button(signal_name: String) -> void:
-	emit_signal(signal_name)
-
-
-func _on_button_hover() -> void:
-	pass
+	# Each signal is emitted through a string literal so the compiler can see
+	# the declaration is used; a parameterised emit_signal(name) reads as
+	# "declared but never emitted" in the editor warnings.
+	match signal_name:
+		"draw_pressed":
+			emit_signal("draw_pressed")
+		"pass_pressed":
+			emit_signal("pass_pressed")
+		"uno_pressed":
+			emit_signal("uno_pressed")
+		"catch_pressed":
+			emit_signal("catch_pressed")
+		"sort_pressed":
+			emit_signal("sort_pressed")
+		"menu_pressed":
+			emit_signal("menu_pressed")
 
 
 func get_buttons() -> Array:
