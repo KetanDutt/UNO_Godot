@@ -39,6 +39,18 @@ headless test suites or the layout preview renderer.
 | **Ghost cards hung the game** (found by running) | Three paths could interrupt a card's deal flight and leave it stranded: a re-layout while the fan re-flowed killed the fade-in (a permanent near-invisible card), a rejection shake on a card still flying in left it stuck in the flight band above the fan — floating there and swallowing clicks meant for the cards beneath, which reads as "the game hangs" until a pause/resume (whose refresh, plus the mouse crossing the cards afterwards, re-lays the hand) — and `move_to()` kept deferring to flight tweens that were already dead, because `SceneTreeTween.kill()` does not clear `is_valid()`. Every interruption now lands the card: re-targets finish an interrupted fade, the shake restores pose/opacity/flight state, liveness is judged by `is_running()`, and `_settle()` guarantees a landed card is opaque. A soak probe (`Tests/HangProbe.gd`) drives the real input path — hovers, clicks, drags, misclicks, UNO-less play — across opponent/animation/rule configs and flags any hand card that is off-slot, invisible, transparent or stuck in flight. |
 | Use-after-free | Culled discard views could still be reached by a pending click or timer. Guarded with `is_instance_valid()`. |
 
+### Second pass (v1.1.0)
+
+| Bug | Detail |
+| --- | --- |
+| **The pause menu did not pause the game** | Every gameplay timer (AI think time, the deal, the opening reveal, summary delays) was a `SceneTreeTimer`, which processes by default even while the tree is paused. Opening the menu mid-think let the AI take its turn — state, sound and all — behind the frozen screen. All gameplay timers are now created with `process_always = false`; cosmetic-only timers were deliberately left running. |
+| **The high-contrast toggle did nothing after boot** | The theme was built once in `_ready()`; flipping the setting changed no colour because `_on_settings_changed` never rebuilt it. It is now regenerated and re-applied to the HUD, menu and picker roots live. |
+| **The UNO button was dead during the late call** | The call itself was legal off-turn (the rules support the late self-call), but the button enable check required `current_player == 0`, so only the `U` hotkey worked. |
+| **The CATCH button went stale and failed silently** | The catch opening was only re-evaluated at the start of the player's turn; the button could remain armed after the target drew or self-called, and a click that failed the rules check did nothing at all. It is recomputed from live rules state on every refresh, and a failed catch now says "Too late" instead of swallowing the click. |
+| **Resize flattened the discard pile** | `_on_viewport_resized` re-stamped every resting discard at the exact pile centre, discarding the hand-stacked jitter offsets. Each view now carries its `discard_offset`. |
+| **Untracked glow fade fought the pulse** | A slow fade-out tween on the playable glow (started before a refresh) landed its final alpha after a new pulse had begun, dimming a card that was just highlighted. The fade is now tracked per purpose and killed like every other tween. |
+| Dead code | `AudioDirector.play_sequence` (never called), `EffectsDirector._vignette` (declared, never built), a double guard in `CardView.flip_to`. |
+
 ## Performance
 
 | Change | Effect |
@@ -48,6 +60,9 @@ headless test suites or the layout preview renderer.
 | HUD moved to a `CanvasLayer` | `update_ui()` called `raise()` on every update to keep the HUD on top. |
 | SFX cached once | Samples were regenerated in GDScript at startup on every launch; now built once in `AudioDirector._build_streams()`. |
 | Discard culling | Only the newest six discards stay in the scene tree. |
+| **`CardView.move_to()` no-op at rest** | The refresh after every event batch restarted a 0.34 s reposition tween per resting card, forever — 7–30 live tweens doing nothing. A card already parked at exactly its rest pose (±0.5 px, ±0.5°, scale ±0.02, alpha ≥ 0.999) now skips the tween entirely. |
+| **`float_text()` font cache** | Built a fresh filtered `DynamicFont` per call; now cached by pixel size (the same fix the particle pool got). |
+| Frame-rate-independent shake | Exponential decay per unit time instead of a per-frame lerp, so a 30 fps and a 144 fps screen shake identically. |
 
 ## Repository size
 
@@ -64,14 +79,27 @@ headless test suites or the layout preview renderer.
 
 ## Testing
 
-3121 assertions across four headless suites, all wired into CI:
+The full bed is 3154 assertions across four suites (389 rules, 2644 layout,
+51 draw order, 70 integration), plus the manual soak probe and layout preview
+pipeline described in [TESTING.md](TESTING.md). The v1.1.0 pass added
+jump-in legality/turn-flow/disabled tests to `TestRules` and a whole
+jump-in-and-catch-window group (human jump-in, AI jump-in, UNO button during
+the window, opponent catch) to `TestIntegration`, and found two real staging
+bugs in the tests themselves in the process: action cards staged as neutral
+turn-passers (a Skip quietly rewrote the turn order), a helper that stripped
+the very card it was about to play, and — surfacing roughly once in eight
+runs — a racy sample in the draw-order suite that read the top discard's
+depth while an opponent's throw was still in the flight band. The suite now
+waits for pile flights to land before sampling.
+
+3150 assertions across four headless suites, all wired into CI:
 
 | Suite | Assertions | Scope |
 | --- | --- | --- |
-| `TestRules.gd` | 370 | Rules engine, AI legality, card conservation, 100-game seeded soak. |
+| `TestRules.gd` | 389 | Rules engine, AI legality, jump-in semantics, card conservation, 100-game seeded soak. |
 | `TestLayout.gd` | 2644 | Geometry at 7 resolutions × 7 hand sizes, text fit, glyph coverage. |
 | `TestDrawOrder.gd` | 51 | Canvas strata, z bands, the pile's play order, cards in transit, hover/drag depth, pathological hand sizes, interrupted-flight healing. |
-| `TestIntegration.gd` | 56 | Boots the real scene: menus, settings, save/reload, full matches, 3- and 4-handed play, house rules, resizes, pause, teardown. |
+| `TestIntegration.gd` | 70 | Boots the real scene: menus, settings, save/reload, full matches, 3- and 4-handed play, house rules, jump-ins, the catch window, resizes, pause, teardown. |
 
 Every suite exits non-zero on failure. Verified by deliberately introducing a
 failure and confirming the exit code.
@@ -115,11 +143,13 @@ numeric assertions had flagged. Every one of those became a test afterwards.
    Pages deployment at it. This is the highest-value remaining task.
 2. **Replay files.** Deck and AI are already seeded; persisting the seed plus
    the action list would make bug reports exactly reproducible.
-3. **Jump-in.** `Ruleset.jump_in` exists as a flag but is not implemented.
-4. **Localisation.** All user-facing strings are inline; moving them to a
+3. **Localisation.** All user-facing strings are inline; moving them to a
    translation table would be mechanical.
-5. **Touch tuning.** Hit targets scale with the layout, but a dedicated phone
+4. **Touch tuning.** Hit targets scale with the layout, but a dedicated phone
    portrait layout would need a new band arrangement in `TableLayout`.
+
+Jump-in (previously item 3) shipped in v1.1.0, with rules, AI, HUD, help text,
+three rules tests and five integration assertions covering it.
 
 ## Manual QA checklist
 

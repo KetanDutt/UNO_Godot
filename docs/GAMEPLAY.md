@@ -17,6 +17,19 @@ time and let you name the next colour.
 If you cannot — or would rather not — play, press **DRAW**. You may play the
 card you just drew if it is legal, otherwise press **PASS** to end your turn.
 
+### Jumping in (house rule)
+
+With **Jump-in** enabled, any player holding a card *identical* to the top of
+the discard pile — same colour **and** same value — may play it immediately,
+out of turn. The table then resumes from the jumper's seat. Wilds can never be
+jumped in with, nobody can jump in on the untouched opening card, and a live
+draw stack closes the window.
+
+You jump in by simply clicking (or dragging) the twin card while another player
+is deciding — it stays highlighted in your hand. The opponents have the same
+right, but they react on a human-scale delay, so a fast click always beats
+them. Hard opponents jump most reliably; Easy ones often miss the opening.
+
 Cards you can legally play are lifted slightly and outlined. Illegal cards do
 not respond to a click beyond a short shake.
 
@@ -43,12 +56,16 @@ When you are about to drop to one card, press **UNO!**. You may call it while
 holding two cards (before you play), or immediately after playing down to one.
 
 If you reach one card without calling, you are **vulnerable**: an opponent can
-catch you and you draw two as a penalty. The opponents will catch you — how
+catch you and you draw two as a penalty. You keep a short grace window — about
+one second on Hard, a little longer on Easy — in which you can still press
+**UNO!** to self-call and escape the catch. The opponents will catch you — how
 reliably depends on the difficulty. You can catch them too, with **CATCH!**,
-which only appears when someone is actually catchable.
+which only appears while someone is actually catchable. Opponents forget to
+call UNO too (Easy ones especially) and the other CPUs will happily punish
+them.
 
 A seat plate showing `!` next to a hand count means that player is vulnerable
-right now.
+right now — including you, so watch your own plate.
 
 ## Scoring
 
@@ -75,16 +92,17 @@ and persist to `user://settings.cfg`.
 | --- | --- | --- |
 | Opponents | 1–3 | Applies from the next round. |
 | Difficulty | Easy / Normal / Hard | See below. |
-| Target score | 200 / 300 / 500 / 750 | Points needed to win the match. |
+| Target score | 100 / 200 / 300 / 500 / 750 | Points needed to win the match. |
 
 ### House rules
 
 | Rule | Default | Effect |
 | --- | --- | --- |
-| Stacking | On | Answer a Draw Two with another Draw Two; the penalty accumulates and passes on. The pending total is shown on the discard pile. |
+| Stacking | Off | Answer a Draw Two with another Draw Two (or escalate with a Wild Draw Four); the penalty accumulates and passes on. The pending total is shown on the discard pile. |
 | Draw until playable | Off | Drawing keeps dealing you cards until one of them is legal, instead of exactly one. |
 | Seven-Zero | Off | Playing a 7 swaps your hand with a player of your choice; playing a 0 rotates every hand in the direction of play. |
 | Force play | Off | If you hold a legal card you must play it — drawing is disabled. |
+| Jump-in | Off | A card identical to the top of the pile may be played out of turn by anyone; play resumes from the jumper. See above. |
 
 ### Display and accessibility
 
@@ -112,6 +130,7 @@ important cues.
 | Tracks colours you are void in | No | No | Yes |
 | Calls UNO reliably | Sometimes | Usually | Almost always |
 | Catches your missed UNO | Rarely | Often | Almost always |
+| Jumps in with an exact twin | Sometimes | Usually | Always |
 | Decision noise | High | Moderate | Low |
 
 All three think for a short, slightly random time so play feels natural rather
@@ -133,6 +152,6 @@ Menus are fully keyboard and gamepad navigable.
 
 ## Statistics
 
-The stats screen tracks rounds played, rounds won, win rate, cards played,
-UNO calls and successful catches. It can be reset independently of the rest of
-your settings.
+The stats screen tracks matches played and won (with win rate), rounds played
+and won (with round win rate), cards played, UNO calls and your best round
+score. It can be reset independently of the rest of your settings.

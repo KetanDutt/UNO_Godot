@@ -1,8 +1,10 @@
 # UNO
 
+![UNO](Assets/Uno%20Game%20Assets/Banner.png)
+
 A polished single-player UNO-style card game built in Godot 3.x. Play 1v1 or
-against up to three opponents, with configurable house rules, three AI
-difficulties, match scoring, and a full accessibility pass.
+against up to three opponents, with configurable house rules (including
+jump-in), three AI difficulties, match scoring, and a full accessibility pass.
 
 ![The table at 1280x720](docs/images/table-preview.png)
 
@@ -11,33 +13,41 @@ difficulties, match scoring, and a full accessibility pass.
 **Game**
 
 - The full 108-card deck, all action cards, and correct two-player Reverse.
-- 2–4 players, match scoring to a configurable target, round summaries.
-- Three AI difficulties. Hard tracks which colours you are void in and holds
-  Wild Draw Four for the moment it hurts most.
-- House rules: stacking Draw Twos, draw-until-playable, Seven-Zero, force-play.
-- UNO calls, missed-UNO penalties, and catching opponents who forget.
+- 2–4 players, match scoring to a configurable target, round summaries with a
+  per-round point breakdown.
+- Three AI difficulties. Hard tracks which colours you are void in, holds
+  Wild Draw Four for the moment it hurts most, and never misses a catch.
+- House rules: stacking Draw Twos, draw-until-playable, Seven-Zero, force-play
+  and **jump-in** — an exact twin of the top card can be slapped down out of
+  turn, by you *or* the opponents.
+- UNO calls (including the late self-call), a fair catch window before an
+  opponent punishes a missed call, and catching opponents who forget.
 
 **Feel**
 
 - Cards fan, arc, tilt into a drag, and snap back when you drop them somewhere
   illegal. Everything runs on `SceneTreeTween`.
-- Pooled particles, floating score text, screen shake, and colour flashes.
-- A complete sound bed — shuffles, deals, plays, penalties, UNO stings, and a
-  music loop — **synthesised at runtime**, so no audio files ship in the repo.
+- Pooled particles, floating score text, screen shake, colour flashes, a table
+  vignette, and a celebration when the winning card lands.
+- A complete sound bed — shuffles, deals, plays, flips, penalties, UNO stings,
+  jump-in stabs, and a music loop — **synthesised at runtime**, so no audio
+  files ship in the repo.
+- A genuine pause: gameplay timers stop with the tree, so opening the menu
+  mid-deal or mid-think freezes the table instead of letting the AI play on.
 
 **Accessibility**
 
 - Animation speed from 0.5× to 2.0×, applied uniformly to animation, AI thinking
   time, and menu delays.
-- Colour-blind markers, high contrast, and independent toggles for screen shake
-  and particles.
+- Colour-blind markers, live high-contrast theming, and independent toggles for
+  screen shake and particles.
 - Full keyboard and gamepad navigation everywhere.
 
 **Engineering**
 
 - The rules engine has no dependency on the scene tree, so it is tested headless
   in about a second.
-- 3070 assertions across three suites, running in CI.
+- 3154 assertions across four suites, running in CI on every push.
 - All on-screen geometry is computed in one place and verified at seven
   resolutions.
 
@@ -45,7 +55,7 @@ difficulties, match scoring, and a full accessibility pass.
 
 ```bash
 # Godot 3.5 or newer in the 3.x line
-godot --path . 
+godot --path .
 ```
 
 Or open the folder in the Godot 3.x editor and press play. The main scene is
@@ -57,14 +67,17 @@ Or open the folder in the Godot 3.x editor and press play. The main scene is
 ## Tests
 
 ```bash
-godot --no-window -s Tests/TestRules.gd         # 370 assertions, ~1s
+godot --no-window -s Tests/TestRules.gd         # 389 assertions, ~1s
 godot --no-window -s Tests/TestLayout.gd        # 2644 assertions, ~1s
-godot --no-window -s Tests/TestIntegration.gd   # 56 assertions, ~30s
+godot --no-window -s Tests/TestDrawOrder.gd     # 51 assertions, ~15s
+godot --no-window -s Tests/TestIntegration.gd   # 70 assertions, ~35s
 ```
 
 `TestIntegration` boots the real game scene and drives it through menus,
-settings, save/reload, complete matches, window resizes, and teardown. All three
-exit non-zero on failure and run on every push.
+settings, save/reload, complete matches, jump-ins, UNO catch windows, window
+resizes, and teardown. All four exit non-zero on failure and run on every push.
+See [docs/TESTING.md](docs/TESTING.md) for what each suite covers and how to
+extend them.
 
 Linting:
 
@@ -83,6 +96,7 @@ gdlint Scripts/ Tests/
 | Call UNO | **UNO!** | `U` | `RB` |
 | Catch a missed UNO | **CATCH!** | `C` | — |
 | Sort hand | **SORT** | `S` | `LB` |
+| Jump in (house rule) | Click the twin card | `←` `→`, then `Enter` | Stick, `A` |
 | Pause | **MENU** | `Esc` | `B` / `Start` |
 
 Full rules, every setting, and the difficulty breakdown are in
@@ -102,12 +116,13 @@ Scripts/
     CardData.gd        One card
     Deck.gd            108-card deck, seeded shuffle, recycling
     GameRules.gd       Turn state machine and the semantic event queue
-    AIPlayer.gd        Opponent decisions
+    AIPlayer.gd        Opponent decisions, including jump-in reflexes
   Systems/
     SettingsManager.gd Versioned config in user://settings.cfg
     AudioDirector.gd   Runtime-synthesised SFX and music
     ThemeFactory.gd    Fonts, colour tokens, styleboxes
-    EffectsDirector.gd Pooled particles, floating text, shake
+    EffectsDirector.gd Pooled particles, floating text, shake, vignette
+    ReactionDirector.gd Delayed opponent reactions: catch windows, AI jump-ins
   UI/
     TableLayout.gd     All on-screen geometry, as pure functions
     EventPresenter.gd  Turns rules events into animation and sound
@@ -119,7 +134,7 @@ Scripts/
 Tests/                 Headless suites plus the layout dump diagnostic
 Tools/
   preview_layout.py    Renders a PNG mock-up from a layout dump
-docs/                  Architecture, gameplay, production notes
+docs/                  Architecture, gameplay, testing, production notes
 ```
 
 ## How the pieces fit
@@ -127,7 +142,8 @@ docs/                  Architecture, gameplay, production notes
 `Scripts/Core` never touches the scene tree. `GameRules` mutates state and
 appends semantic events (`CARD_PLAYED`, `PENALTY_DRAW`, `ROUND_ENDED`, …) to a
 queue; `EventPresenter` drains that queue and turns it into animation, sound and
-HUD updates.
+HUD updates, while `ReactionDirector` schedules the *delayed* opponent
+responses (catch windows, jump-ins) that need real timers.
 
 Because state is final before any tween begins, the presentation can be sped up,
 slowed down or skipped entirely without the simulation ever disagreeing with
@@ -149,14 +165,16 @@ Exports need the Godot editor binary and the matching export templates.
 > **The web build in this repository is not current.** The previously committed
 > `build/` directory was a stale export of code that no longer exists, so it was
 > removed rather than left to mislead. The GitHub Pages deployment will keep
-> serving the old version until someone re-exports from an environment with the
-> editor installed.
+> serving the old version until someone re-exports from an environment with
+> the editor installed.
 
 ## Documentation
 
 - [Gameplay and rules](docs/GAMEPLAY.md) — how to play, every setting, AI behaviour
 - [Architecture](docs/ARCHITECTURE.md) — layering, the event queue, layout system, testing
+- [Testing guide](docs/TESTING.md) — the four suites, how to run and extend them
 - [Production notes](docs/PRODUCTION_NOTES.md) — bugs fixed, performance work, known limitations
+- [Changelog](docs/CHANGELOG.md) — what changed in each version
 
 ## Credits
 

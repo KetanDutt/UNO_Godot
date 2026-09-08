@@ -27,6 +27,7 @@ var rule_stacking: bool = false
 var rule_draw_until_playable: bool = false
 var rule_seven_zero: bool = false
 var rule_force_play: bool = false
+var rule_jump_in: bool = false           # identical card may be played out of turn
 
 # --- presentation / accessibility ---
 var animation_speed: float = 1.0     # 0.5 = relaxed, 2.0 = snappy
@@ -40,6 +41,7 @@ var high_contrast: bool = false
 # --- career stats ---
 var stat_games_played: int = 0
 var stat_games_won: int = 0
+var stat_rounds_played: int = 0
 var stat_rounds_won: int = 0
 var stat_cards_played: int = 0
 var stat_best_score: int = 0
@@ -74,6 +76,7 @@ func load_settings() -> void:
 	rule_draw_until_playable = _read(config, "gameplay", "rule_draw_until_playable", rule_draw_until_playable)
 	rule_seven_zero = _read(config, "gameplay", "rule_seven_zero", rule_seven_zero)
 	rule_force_play = _read(config, "gameplay", "rule_force_play", rule_force_play)
+	rule_jump_in = _read(config, "gameplay", "rule_jump_in", rule_jump_in)
 
 	animation_speed = _read(config, "display", "animation_speed", animation_speed)
 	table_variant = _read(config, "display", "table_variant", table_variant)
@@ -85,6 +88,7 @@ func load_settings() -> void:
 
 	stat_games_played = _read(config, "stats", "games_played", stat_games_played)
 	stat_games_won = _read(config, "stats", "games_won", stat_games_won)
+	stat_rounds_played = _read(config, "stats", "rounds_played", stat_rounds_played)
 	stat_rounds_won = _read(config, "stats", "rounds_won", stat_rounds_won)
 	stat_cards_played = _read(config, "stats", "cards_played", stat_cards_played)
 	stat_best_score = _read(config, "stats", "best_score", stat_best_score)
@@ -119,6 +123,7 @@ func _sanitise() -> void:
 	table_variant = int(clamp(table_variant, 0, 4))
 	stat_games_played = int(max(0, stat_games_played))
 	stat_games_won = int(max(0, stat_games_won))
+	stat_rounds_played = int(max(0, stat_rounds_played))
 	stat_rounds_won = int(max(0, stat_rounds_won))
 	stat_cards_played = int(max(0, stat_cards_played))
 	stat_best_score = int(max(0, stat_best_score))
@@ -144,6 +149,7 @@ func save_settings() -> void:
 	config.set_value("gameplay", "rule_draw_until_playable", rule_draw_until_playable)
 	config.set_value("gameplay", "rule_seven_zero", rule_seven_zero)
 	config.set_value("gameplay", "rule_force_play", rule_force_play)
+	config.set_value("gameplay", "rule_jump_in", rule_jump_in)
 
 	config.set_value("display", "animation_speed", animation_speed)
 	config.set_value("display", "table_variant", table_variant)
@@ -155,6 +161,7 @@ func save_settings() -> void:
 
 	config.set_value("stats", "games_played", stat_games_played)
 	config.set_value("stats", "games_won", stat_games_won)
+	config.set_value("stats", "rounds_played", stat_rounds_played)
 	config.set_value("stats", "rounds_won", stat_rounds_won)
 	config.set_value("stats", "cards_played", stat_cards_played)
 	config.set_value("stats", "best_score", stat_best_score)
@@ -177,6 +184,7 @@ func reset_to_defaults() -> void:
 	rule_draw_until_playable = false
 	rule_seven_zero = false
 	rule_force_play = false
+	rule_jump_in = false
 	animation_speed = 1.0
 	table_variant = 1
 	show_hints = true
@@ -190,6 +198,7 @@ func reset_to_defaults() -> void:
 func reset_stats() -> void:
 	stat_games_played = 0
 	stat_games_won = 0
+	stat_rounds_played = 0
 	stat_rounds_won = 0
 	stat_cards_played = 0
 	stat_best_score = 0
@@ -201,6 +210,12 @@ func win_rate() -> float:
 	if stat_games_played <= 0:
 		return 0.0
 	return float(stat_games_won) / float(stat_games_played) * 100.0
+
+
+func round_win_rate() -> float:
+	if stat_rounds_played <= 0:
+		return 0.0
+	return float(stat_rounds_won) / float(stat_rounds_played) * 100.0
 
 
 # Duration multiplier applied to every tween in the game.

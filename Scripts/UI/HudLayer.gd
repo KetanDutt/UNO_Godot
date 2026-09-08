@@ -22,6 +22,7 @@ const DrawOrder = preload("res://Scripts/UI/DrawOrder.gd")
 
 var settings = null
 
+var _root: Control = null
 var _status_panel: PanelContainer = null
 var _status_label: Label = null
 var _color_chip: Panel = null
@@ -45,6 +46,8 @@ var _button_bar: VBoxContainer = null
 var _status_tween = null
 var _chip_tween = null
 var _uno_pulse = null
+var _direction_tween = null
+var _last_direction: int = 0
 
 
 func _ready() -> void:
@@ -63,6 +66,7 @@ func build(settings_ref, theme: Theme) -> void:
 	root.anchor_bottom = 1.0
 	root.theme = theme
 	add_child(root)
+	_root = root
 
 	_build_status(root)
 	_build_color_indicator(root)
@@ -70,6 +74,13 @@ func build(settings_ref, theme: Theme) -> void:
 	_build_scoreboard(root)
 	_build_buttons(root)
 	_build_turn_banner(root)
+
+
+
+# Swap the theme live (the high-contrast toggle), without rebuilding widgets.
+func apply_theme(theme: Theme) -> void:
+	if _root != null:
+		_root.theme = theme
 
 
 # --- status banner ---------------------------------------------------------
@@ -411,7 +422,28 @@ func set_direction(direction: int) -> void:
 		return
 	# Roboto ships no arrow glyphs, so guillemets stand in for turn order.
 	_direction_icon.text = "\u00BB" if direction > 0 else "\u00AB"
+	if direction == _last_direction:
+		_direction_icon.add_color_override("font_color", Color(0.85, 0.88, 0.95))
+		return
+	# A reversal deserves a flourish: the marker swells and flashes.
+	var changed = _last_direction != 0
+	_last_direction = direction
 	_direction_icon.add_color_override("font_color", Color(0.85, 0.88, 0.95))
+	if not changed:
+		return
+	if _direction_tween != null and _direction_tween.is_valid():
+		_direction_tween.kill()
+	_direction_icon.rect_pivot_offset = _direction_icon.rect_size * 0.5
+	_direction_icon.modulate = ThemeFactory.ACCENT
+	var d = settings.anim_scale(0.5) if settings != null else 0.5
+	_direction_tween = create_tween()
+	_direction_tween.set_parallel(true)
+	_direction_tween.tween_property(_direction_icon, "rect_scale", Vector2(1.7, 1.7), d * 0.35) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_direction_tween.chain().tween_property(_direction_icon, "rect_scale", Vector2.ONE, d * 0.65) \
+		.set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	_direction_tween.tween_property(_direction_icon, "modulate",
+		Color(0.85, 0.88, 0.95), d * 0.8).set_delay(d * 0.2)
 
 
 func set_pending_stack(amount: int) -> void:
@@ -430,8 +462,17 @@ func set_pending_stack(amount: int) -> void:
 
 
 func set_deck_counts(draw_count: int, discard_count: int) -> void:
-	if _deck_label != null:
-		_deck_label.text = "DECK  %d\nPILE  %d" % [draw_count, discard_count]
+	if _deck_label == null:
+		return
+	_deck_label.text = "DECK  %d\nPILE  %d" % [draw_count, discard_count]
+	# Warn when the stock is running low: the next recycle is about to swing
+	# the discard pile back into play.
+	if draw_count <= 5:
+		_deck_label.add_color_override("font_color", Color(1.0, 0.45, 0.38))
+	elif draw_count <= 12:
+		_deck_label.add_color_override("font_color", Color(1.0, 0.78, 0.38))
+	else:
+		_deck_label.add_color_override("font_color", Color(0.86, 0.89, 0.95))
 
 
 func set_scores(names: Array, scores: Array, target: int, round_number: int) -> void:

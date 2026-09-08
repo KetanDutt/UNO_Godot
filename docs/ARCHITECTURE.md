@@ -56,6 +56,9 @@ The full set is `GAME_STARTED`, `CARD_DEALT`, `OPENING_CARD`, `CARD_PLAYED`,
 `DIRECTION_REVERSED`, `PLAYER_SKIPPED`, `PENALTY_DRAW`, `STACK_GROWN`,
 `UNO_CALLED`, `UNO_PENALTY`, `HANDS_SWAPPED`, `HANDS_ROTATED`, `DECK_RECYCLED`,
 `DECK_EXHAUSTED`, `ROUND_ENDED`, `MATCH_ENDED` and `INVALID_MOVE`.
+Events carry everything the presentation needs inline — `CARD_PLAYED` includes
+the player, the card, the remaining hand size and a `jump_in` flag for
+out-of-turn plays.
 
 This is what makes the presentation layer replaceable. A text-only front end, a
 replay viewer, or a network client would consume the same queue.
@@ -84,7 +87,8 @@ object.
 | `SettingsManager.gd` | `user://settings.cfg`, versioned, with migration. Emits `settings_changed`. |
 | `AudioDirector.gd` | Synthesises every sound effect at boot into `AudioStreamSample`. Voice pool + music bus. |
 | `ThemeFactory.gd` | Fonts, colour tokens and `StyleBox`es. One place to restyle the whole UI. |
-| `EffectsDirector.gd` | Pooled particles, floating text, screen shake, flashes. |
+| `EffectsDirector.gd` | Pooled particles, floating text, screen shake, flashes, the table vignette. |
+| `ReactionDirector.gd` | Delayed opponent reactions: UNO-catch windows and AI jump-ins. See below. |
 
 ### `Scripts/UI` — presentation
 
@@ -103,6 +107,34 @@ Owns the scene, the systems and the input handling; drives the turn loop. It is
 the only script that both reads rules state and touches nodes, which is exactly
 why the event handling was moved out into `EventPresenter` — the controller was
 otherwise heading past 1300 lines.
+
+## Delayed reactions: ReactionDirector
+
+Some opponent behaviour must happen *later*, on a real timer, for the game to
+feel fair and alive:
+
+- **UNO catch windows.** When a seat drops to one card without calling, an
+  opponent arms a catch that fires after `AIPlayer.catch_delay()` (≈1 s on Hard
+  to ≈2.2 s on Easy, scaled by the animation-speed setting). Until it fires,
+  the player can still self-call — that window *is* the feature. The AI that
+  catches is the next opponent in turn order after the victim, and AIs that
+  forget their own UNO call are caught by the other CPUs too.
+- **AI jump-ins.** Under the jump-in house rule, after any play an opponent
+  holding an exact twin of the new top card may arm a jump-in that fires after
+  a human-scale reaction delay. While the *human* is the one deciding, nothing
+  is armed — opponents react to plays, never to hesitation, so a fast click
+  always wins.
+
+`ReactionDirector` follows the same shape as `EventPresenter`: a `Reference`
+with a back-reference to the controller, no scene nodes of its own. Reactions
+are **armed** when `evaluate()` (called after every event batch) finds them
+possible, and **re-validated** when they fire — the state may have changed in
+between (self-call, another card on top, round over). Tokens invalidate
+everything armed by an older table when the round restarts.
+
+All gameplay timers are created with `process_always = false`, so a pause menu
+freezes the deal, the AI's think time and every armed reaction. Cosmetic-only
+timers would keep running, which is why the distinction is deliberate.
 
 ## Layout is computed, not hand-placed
 
@@ -212,18 +244,20 @@ now have permanent guards:
 
 | Suite | Scope | Runtime |
 | --- | --- | --- |
-| `Tests/TestRules.gd` | Rules engine, AI legality, 100-game soak, card conservation. | ~1 s |
+| `Tests/TestRules.gd` | Rules engine, AI legality, jump-in semantics, 100-game soak, card conservation. | ~1 s |
 | `Tests/TestLayout.gd` | Geometry across 7 resolutions, text fit, font glyph coverage. | ~1 s |
 | `Tests/TestDrawOrder.gd` | Canvas strata, z bands, pile play order, flights, hover and drag depth, interrupted-flight healing. | ~20 s |
-| `Tests/TestIntegration.gd` | Boots the real scene: menus, settings, full matches, resizes, teardown. | ~30 s |
+| `Tests/TestIntegration.gd` | Boots the real scene: menus, settings, full matches, human and AI jump-ins, the catch window, resizes, teardown. | ~35 s |
 
 ```bash
 godot --no-window -s Tests/TestRules.gd
 godot --no-window -s Tests/TestLayout.gd
+godot --no-window -s Tests/TestDrawOrder.gd
 godot --no-window -s Tests/TestIntegration.gd
 ```
 
-All three exit non-zero on failure and run in `.github/workflows/ci.yml`.
+All four exit non-zero on failure and run in `.github/workflows/ci.yml`.
+See [TESTING.md](TESTING.md) for a guide to the suites and how to extend them.
 
 `Tests/DumpLayout.gd` is a diagnostic rather than a test: it writes the resolved
 geometry to `user://layout_dump.json`, which `Tools/preview_layout.py` renders

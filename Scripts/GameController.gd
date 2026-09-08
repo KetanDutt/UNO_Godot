@@ -28,6 +28,7 @@ const AudioDirector = preload("res://Scripts/Systems/AudioDirector.gd")
 const SettingsManager = preload("res://Scripts/Systems/SettingsManager.gd")
 const EffectsDirector = preload("res://Scripts/Systems/EffectsDirector.gd")
 const ThemeFactory = preload("res://Scripts/Systems/ThemeFactory.gd")
+const ReactionDirector = preload("res://Scripts/Systems/ReactionDirector.gd")
 
 const ASSET_DIR = "res://Assets/Uno Game Assets/"
 
@@ -55,6 +56,9 @@ var _discard_views: Array = []
 
 var presenter = null
 
+# Delayed opponent reactions (UNO-catch windows, AI jump-ins).
+var reactions = null
+
 var _busy: bool = false
 
 # Safety net: if an AI turn is ever dropped (a timer lost to a scene rebuild,
@@ -70,6 +74,7 @@ var _pending_wild_card = null
 var _last_viewport_size: Vector2 = Vector2.ZERO
 var _joy_axis_lock: int = 0
 var _theme: Theme = null
+var _theme_high_contrast: bool = false
 var _drop_zone_radius: float = 150.0
 var _ai_turn_token: int = 0
 
@@ -103,10 +108,14 @@ func _setup_systems() -> void:
 	_apply_audio_settings()
 
 	_theme = ThemeFactory.build_theme(settings.high_contrast)
+	_theme_high_contrast = settings.high_contrast
 
 	# Presentation layer: replays the rules engine's event queue as animation,
 	# sound and HUD updates. Created last so it can see the finished systems.
 	presenter = EventPresenter.new(self)
+
+	# Delayed opponent reactions: UNO-catch windows and AI jump-ins.
+	reactions = ReactionDirector.new(self)
 
 
 func _setup_scene() -> void:
@@ -340,6 +349,7 @@ func _start_match() -> void:
 	ruleset.draw_until_playable = settings.rule_draw_until_playable
 	ruleset.seven_zero = settings.rule_seven_zero
 	ruleset.force_play = settings.rule_force_play
+	ruleset.jump_in = settings.rule_jump_in
 	ruleset.target_score = settings.target_score
 
 	var player_count = settings.opponent_count + 1
@@ -388,6 +398,10 @@ func _clear_table() -> void:
 	_catch_available = false
 	_catch_target = -1
 	_pending_wild_card = null
+	# Anything scheduled against the old table (catch windows, AI jump-ins)
+	# is dead; a firing timer retires on the token check.
+	if reactions != null:
+		reactions.invalidate()
 
 
 # ---------------------------------------------------------------------------
@@ -512,14 +526,13 @@ func _begin_turn() -> void:
 		else:
 			hud.set_status("Your turn - no legal card. Draw from the deck.")
 		_play_cue("turn")
-		_evaluate_catch_opportunity()
 	else:
 		_busy = true
 		hud.set_status("%s is thinking..." % rules.player_names[player])
 		_ai_turn_token += 1
 		var token = _ai_turn_token
 		var ai = _ai_for(player)
-		var timer = get_tree().create_timer(settings.anim_scale(ai.think_time()))
+		var timer = get_tree().create_timer(settings.anim_scale(ai.think_time()), false)
 		timer.connect("timeout", self, "_run_ai_turn", [player, token])
 
 
@@ -545,10 +558,9 @@ func _run_ai_turn(player: int, token: int) -> void:
 
 	var ai = _ai_for(player)
 
-	# Catch the human if they slipped to one card silently.
-	if rules.uno_vulnerable[0] and ai.should_catch_uno():
-		rules.catch_uno(player, 0)
-		_process_events(rules.consume_events())
+	# A missed UNO call is punished by the scheduled catch window
+	# (ReactionDirector), not here - catching at the top of the turn would
+	# leave the human no window at all to self-call.
 
 	var legal = rules.playable_cards(player)
 	if legal.size() > 0:
@@ -565,7 +577,7 @@ func _run_ai_turn(player: int, token: int) -> void:
 		# Play the drawn card if it happens to be legal.
 		var drawn = rules.drawn_playable_card
 		if drawn != null and rules.is_playable(drawn):
-			var pause = get_tree().create_timer(settings.anim_scale(0.45))
+			var pause = get_tree().create_timer(settings.anim_scale(0.45), false)
 			pause.connect("timeout", self, "_ai_play_drawn", [player, token])
 			return
 		if rules.can_pass(player):
@@ -620,24 +632,32 @@ func _can_act() -> bool:
 		and not menus.is_open() and not color_picker.is_open()
 
 
+# Wider gate used for card interaction: with the jump-in house rule on, an
+# exact twin of the top discard is playable even off-turn. Legality itself is
+# still decided by the rules engine in _try_play().
+func _can_interact() -> bool:
+	return rules != null and rules.round_active and not _busy \
+		and not menus.is_open() and not color_picker.is_open()
+
+
 # ---------------------------------------------------------------------------
 # Player actions
 # ---------------------------------------------------------------------------
 func _on_card_pressed(view) -> void:
-	if not _can_act():
+	if not _can_interact():
 		return
 	_try_play(view)
 
 
 func _on_card_hovered(view) -> void:
-	if _can_act() and view.playable:
+	if _can_interact() and view.playable:
 		_play_cue("hover", rand_range(0.96, 1.06))
 
 
 func _on_card_drag_ended(view, global_position: Vector2) -> void:
 	if not is_instance_valid(view):
 		return
-	if not _can_act():
+	if not _can_interact():
 		view.cancel_drag()
 		return
 	# Dropping anywhere near the discard pile counts as a play.
@@ -656,6 +676,15 @@ func _try_play(view) -> void:
 	var card = view.card_data
 	if card == null:
 		return
+	var my_turn = rules.current_player == 0 and not rules.awaiting_color_choice
+	# Off-turn, the only legal play is a jump-in with an exact twin of the
+	# top card. Anything else is rejected with a shake but no misleading
+	# "match colour/value" advice.
+	if not my_turn and not rules.can_jump_in(0, card):
+		view.cancel_drag()
+		view.shake_invalid()
+		_play_cue("error")
+		return
 	if not rules.is_playable(card):
 		view.cancel_drag()
 		view.shake_invalid()
@@ -668,10 +697,7 @@ func _try_play(view) -> void:
 		return
 
 	_busy = true
-	if card.is_wild():
-		rules.play_card(0, card)
-	else:
-		rules.play_card(0, card)
+	rules.play_card(0, card)
 	_process_events(rules.consume_events())
 
 	if rules.awaiting_color_choice:
@@ -722,7 +748,12 @@ func _on_catch_pressed() -> void:
 		return
 	if rules.catch_uno(0, _catch_target):
 		_process_events(rules.consume_events())
-		_evaluate_catch_opportunity()
+		_refresh_all()
+	else:
+		# The opening vanished between the refresh and the click (the target
+		# drew or self-called). Say so instead of failing silently.
+		_play_cue("error")
+		hud.set_status("Too late - %s is safe." % rules.player_names[_catch_target])
 		_refresh_all()
 
 
@@ -780,12 +811,18 @@ func _refresh_all() -> void:
 	_layout_hands(true)
 	_refresh_card_states()
 	_refresh_hud()
+	if reactions != null:
+		reactions.evaluate()
 
 
 func _refresh_card_states() -> void:
 	var my_turn = rules.current_player == 0 and rules.round_active \
 		and not rules.awaiting_color_choice and not _busy
 	var hints = settings.show_hints
+	# Under the jump-in rule an exact twin of the top card stays playable (and
+	# highlighted) even while another seat is on turn.
+	var jump_ready = not my_turn and rules.round_active \
+		and not rules.awaiting_color_choice and rules.rules.jump_in
 
 	for i in range(rules.hands[0].size()):
 		var card = rules.hands[0][i]
@@ -794,10 +831,10 @@ func _refresh_card_states() -> void:
 		var view = _views[card.uid]
 		if not is_instance_valid(view):
 			continue
-		var playable = rules.is_playable(card)
-		view.set_interactive(my_turn)
+		var playable = rules.is_playable(card) if my_turn else rules.can_jump_in(0, card)
+		view.set_interactive(my_turn or playable)
 		view.set_playable(playable and hints)
-		view.set_focused(my_turn and i == _selected_index)
+		view.set_focused((my_turn or jump_ready) and i == _selected_index)
 
 	# Opponent cards are never interactive.
 	for player in range(1, rules.player_count()):
@@ -817,11 +854,21 @@ func _refresh_hud() -> void:
 	hud.set_deck_counts(rules.deck.draw_count(), rules.deck.discard_count())
 	hud.set_scores(rules.player_names, rules.scores, rules.rules.target_score, rules.round_number)
 
+	# Recompute the catch opening from live rules state every refresh so the
+	# CATCH button appears (and disappears) exactly when it is legal.
+	_evaluate_catch_opportunity()
+
 	var my_turn = rules.current_player == 0 and rules.round_active and not _busy
+	# UNO may also be called late: after dropping to one card without calling,
+	# the call is still legal (and the button pulses) until an opponent
+	# catches you or you play again.
+	var uno_legal = rules.round_active and \
+		((my_turn and not rules.awaiting_color_choice and rules.hands[0].size() == 2) \
+		or rules.uno_vulnerable[0])
 	hud.set_button_states(
 		my_turn and rules.can_draw(0),
 		my_turn and rules.can_pass(0),
-		rules.round_active and rules.hands[0].size() == 2 and rules.current_player == 0,
+		uno_legal,
 		rules.hands[0].size() >= 2,
 		_catch_available
 	)
@@ -874,7 +921,7 @@ func _unhandled_input(event) -> void:
 
 	if menus.is_open() or color_picker.is_open():
 		return
-	if not _can_act():
+	if not _can_interact():
 		return
 
 	if _is_left(event):
@@ -992,6 +1039,14 @@ func _play_selected() -> void:
 func _on_settings_changed() -> void:
 	_apply_audio_settings()
 	_apply_table_texture()
+	# The high-contrast toggle rebuilds the theme and re-applies it to the
+	# three UI roots live, so it takes effect without a restart.
+	if _theme != null and _theme_high_contrast != settings.high_contrast:
+		_theme_high_contrast = settings.high_contrast
+		_theme = ThemeFactory.build_theme(settings.high_contrast)
+		hud.apply_theme(_theme)
+		menus.apply_theme(_theme)
+		color_picker.apply_theme(_theme)
 	if rules != null:
 		_refresh_all()
 	color_picker.refresh_labels()
@@ -1028,7 +1083,7 @@ func _on_viewport_resized() -> void:
 	for view in _discard_views:
 		if is_instance_valid(view):
 			view.set_card_scale(discard_scale)
-			view.position = _discard_position()
+			view.position = _discard_position() + view.discard_offset
 	_refresh_hud()
 
 

@@ -68,12 +68,6 @@ func play(cue: String, pitch: float = 1.0) -> void:
 	player.play()
 
 
-# Deal a run of cards with a rising pitch - cheap but very satisfying.
-func play_sequence(cue: String, count: int, start_pitch: float = 0.94, step: float = 0.045) -> void:
-	for i in range(count):
-		play(cue, start_pitch + i * step)
-
-
 func set_music_playing(enabled: bool) -> void:
 	music_enabled = enabled
 	if _music_player == null:
@@ -136,6 +130,7 @@ func _build_streams() -> void:
 	_streams["skip"] = _make_sweep(700.0, 240.0, 0.22, 0.24)
 	_streams["reverse"] = _make_sweep(320.0, 760.0, 0.26, 0.22)
 	_streams["draw_penalty"] = _make_thud()
+	_streams["jump_in"] = _make_arpeggio([NOTE_D5, NOTE_A5], 0.09, 0.24)
 	_streams["wild"] = _make_arpeggio([NOTE_C5, NOTE_E5, NOTE_G5, NOTE_C6], 0.075, 0.20)
 	_streams["uno"] = _make_arpeggio([NOTE_G5, NOTE_C6], 0.13, 0.26)
 	_streams["win"] = _make_fanfare(true)
