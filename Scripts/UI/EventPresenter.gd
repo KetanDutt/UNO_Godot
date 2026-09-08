@@ -109,6 +109,11 @@ func _schedule_deal_sound(delay: float) -> void:
 func _on_event_opening(event: Dictionary) -> void:
 	var card = event["card"]
 	var view = _game._spawn_view(card, true)
+	# The opening card's view belongs to the pile, not to any hand: drop it
+	# from the view registry (exactly like a played card) so a later recycle
+	# + redraw of the same card cannot "find" a stale pile view and skip
+	# spawning a fresh one, leaving the drawn card with no view of its own.
+	_game._views.erase(card.uid)
 	# The opening card waits face-down ON TOP of the deck (its discard-band
 	# depth sits above the deck backs) until the dealer flips it out.
 	view.position = _game._deck_position()

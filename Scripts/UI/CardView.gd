@@ -268,13 +268,21 @@ func _update_glow() -> void:
 # The z a card should show while it is parked at its resting place: the hover
 # band when lifted, otherwise its resting band.
 func _hover_or_rest_z() -> int:
-	return DrawOrder.HOVER if _is_hovered else rest_z
+	if _is_hovered and not _in_flight:
+		return DrawOrder.HOVER
+	if _in_flight:
+		# Hover does not lift a flying card out of the flight band.
+		return DrawOrder.FLYING
+	return rest_z
 
 
 # Called when a flight completes: leave the flight band and settle into the
 # resting (or hover) band.
 func _settle() -> void:
 	_in_flight = false
+	# Whatever owned this card on the way in, a landed card is fully opaque -
+	# an interrupted fade-in must never leave a ghost sitting in the fan.
+	modulate.a = 1.0
 	z_index = _hover_or_rest_z()
 
 
@@ -292,8 +300,13 @@ func move_to(target: Vector2, target_rotation: float, z: int,
 		animated: bool = true, delay: float = 0.0) -> void:
 	# A card already flying to exactly this slot keeps its staggered flight;
 	# re-targeting here would collapse the deal into one simultaneous clump
-	# and drop the card out of the flight band mid-air.
+	# and drop the card out of the flight band mid-air. The flight must be
+	# alive, though: SceneTreeTween.kill() does not clear is_valid(), so the
+	# liveness test is is_running() - a killed or finished tween is going
+	# nowhere, and deferring to it would strand the card in the flight band
+	# forever.
 	var en_route = animated and _in_flight \
+		and _move_tween != null and _move_tween.is_valid() and _move_tween.is_running() \
 		and z == rest_z \
 		and target.distance_to(rest_position) < 0.5 \
 		and abs(target_rotation - rest_rotation) < 0.1
@@ -314,6 +327,7 @@ func move_to(target: Vector2, target_rotation: float, z: int,
 		position = target
 		rotation_degrees = target_rotation
 		z_index = _hover_or_rest_z()
+		modulate.a = 1.0
 		return
 
 	# A card already in transit keeps the flight band until it lands; anything
@@ -336,6 +350,11 @@ func move_to(target: Vector2, target_rotation: float, z: int,
 	if not _is_hovered:
 		_move_tween.tween_property(self, "scale", _base(), duration * 0.8) \
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT).set_delay(delay)
+	# Taking over a card whose fade-in was interrupted must finish that fade,
+	# or the card lands as a permanent ghost.
+	if modulate.a < 0.999:
+		_move_tween.tween_property(self, "modulate:a", 1.0, min(_anim(0.18), duration)) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT).set_delay(delay)
 	if _in_flight:
 		_move_tween.chain().tween_callback(self, "_settle")
 
@@ -474,6 +493,20 @@ func shake_invalid() -> void:
 			.set_trans(Tween.TRANS_SINE)
 	_move_tween.tween_property(self, "position:x", origin.x, duration).set_trans(Tween.TRANS_SINE)
 
+	# The shake replaced whatever owned this card - including a deal flight
+	# whose fade-in it killed. Land it properly afterwards (full pose, opacity,
+	# flight state), so a rejected click on a card still flying in from the
+	# deck cannot strand it in the flight band as a click-swallowing ghost.
+	_move_tween.tween_property(self, "position", origin, _anim(0.12)) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_move_tween.tween_property(self, "rotation_degrees", rest_rotation, _anim(0.12)) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	if modulate.a < 0.999:
+		_move_tween.tween_property(self, "modulate:a", 1.0, _anim(0.15)) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if _in_flight:
+		_move_tween.tween_callback(self, "_settle")
+
 	# Flash red so the rejection reads even with sound off.
 	var flash = create_tween()
 	flash.tween_property(_sprite, "modulate", Color(1.4, 0.45, 0.45, 1), _anim(0.08))
@@ -525,7 +558,10 @@ func _apply_hover(active: bool) -> void:
 		_hover_tween.kill()
 	# Lift into the hover band, then restore the resting depth on exit (a card
 	# in transit stays in the flight band until it lands).
-	z_index = DrawOrder.HOVER if active else _hover_or_rest_z()
+	if _in_flight:
+		z_index = DrawOrder.FLYING
+	else:
+		z_index = DrawOrder.HOVER if active else _hover_or_rest_z()
 
 	var target_position = rest_position + (_lift() if active else Vector2.ZERO)
 	var target_scale = _hover() if active else _base()

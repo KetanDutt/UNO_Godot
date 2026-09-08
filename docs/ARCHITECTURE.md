@@ -214,7 +214,7 @@ now have permanent guards:
 | --- | --- | --- |
 | `Tests/TestRules.gd` | Rules engine, AI legality, 100-game soak, card conservation. | ~1 s |
 | `Tests/TestLayout.gd` | Geometry across 7 resolutions, text fit, font glyph coverage. | ~1 s |
-| `Tests/TestDrawOrder.gd` | Canvas strata, z bands, pile play order, flights, hover and drag depth. | ~15 s |
+| `Tests/TestDrawOrder.gd` | Canvas strata, z bands, pile play order, flights, hover and drag depth, interrupted-flight healing. | ~20 s |
 | `Tests/TestIntegration.gd` | Boots the real scene: menus, settings, full matches, resizes, teardown. | ~30 s |
 
 ```bash
@@ -230,6 +230,13 @@ geometry to `user://layout_dump.json`, which `Tools/preview_layout.py` renders
 into a PNG mock-up using the real card art. That is how the layout was reviewed
 without a GPU, and it caught clipping and collisions the numeric assertions had
 missed.
+
+`Tests/HangProbe.gd` is the gameplay equivalent: a soak probe that boots the
+real game and plays it like a person — hovering, clicking, dragging,
+misclicking unplayable cards — across opponent counts, animation speeds and
+house rules, watching for wedged turn flow, dead input flags and hand cards
+that end up off-slot, invisible or stuck mid-flight. It found the ghost-card
+hangs described in the production notes; it is run manually, not in CI.
 
 ## Conventions
 

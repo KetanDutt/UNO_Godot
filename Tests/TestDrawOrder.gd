@@ -61,6 +61,7 @@ func _run_suite() -> void:
 	yield(_test_played_card_above_hand(), "completed")
 	yield(_test_hover_drag_bands(), "completed")
 	yield(_test_big_hand_isolated(), "completed")
+	yield(_test_ghost_healing(), "completed")
 	_finish()
 
 
@@ -469,3 +470,77 @@ func _force_hand_size(target: int) -> void:
 		var view = _game._spawn_view(card, false)
 		view.position = _game._anchor_for(0)
 	_game._refresh_all()
+
+
+# The ghost bugs (found by running): a hand card whose deal flight is
+# interrupted was left with a frozen fade (alpha 0.0-0.35, i.e. invisible),
+# and a rejection shake on a card still flying in stranded it in the flight
+# band forever - floating above the fan and swallowing clicks meant for the
+# cards beneath. Every interruption path must land the card: full pose,
+# opacity and resting depth.
+func _test_ghost_healing() -> void:
+	print("-- interrupted flights heal --")
+	yield(_wait_for_player_turn(), "completed")
+	var views = _hand_views(0)
+	if views.size() < 4:
+		_force_hand_size(4)
+		views = _hand_views(0)
+	var view = views[0]
+	var slot = _game._fan_slot(0, 0)
+	var other = _game._fan_slot(0, 3)
+
+	# The opening card's view belongs to the pile, not the hand registry - a
+	# stale entry there would make a recycled redraw skip spawning a view.
+	_check(_game._discard_views.size() >= 1
+		and not _game._views.has(_game._discard_views[0].card_data.uid),
+		"opening card is not in the hand view registry")
+
+	# A rejection shake landing on a card mid-flight must land it afterwards:
+	# settled, opaque, in its band, at its slot.
+	view.deal_from(_game._deck_position(), slot["position"], slot["rotation"], slot["z"], 0.0)
+	_check(view.is_in_flight() and view.modulate.a < 0.05,
+		"deal flight starts transparent in the flight band")
+	view.shake_invalid()
+	yield(_advance(1.5), "completed")
+	_check(not view.is_in_flight(), "shaken card is no longer in flight")
+	_check(abs(view.modulate.a - 1.0) < 0.01, "shaken card is fully opaque")
+	_check(view.z_index == DrawOrder.hand(0), "shaken card rests in its band")
+	_check(view.position.distance_to(slot["position"]) < 2.0, "shaken card sits at its slot")
+
+	# A re-target mid-fade (the fan re-flows) must finish the interrupted
+	# fade instead of landing a permanent ghost at the new slot.
+	view.deal_from(_game._deck_position(), slot["position"], slot["rotation"], slot["z"], 0.0)
+	view.move_to(other["position"], other["rotation"], other["z"], true)
+	_check(view.modulate.a < 0.05, "interrupted fade is still frozen mid-fade")
+	yield(_advance(1.5), "completed")
+	_check(abs(view.modulate.a - 1.0) < 0.01, "re-targeted card fades back in")
+	_check(not view.is_in_flight() and view.z_index == other["z"],
+		"re-targeted card settles into the new slot's band")
+	_check(view.position.distance_to(other["position"]) < 2.0, "re-targeted card sits at the new slot")
+
+	# A dead flight tween must never count as "en route": deferring to it
+	# stranded the card in the flight band forever.
+	view.deal_from(_game._deck_position(), slot["position"], slot["rotation"], slot["z"], 0.0)
+	if view._move_tween != null and view._move_tween.is_valid():
+		view._move_tween.kill()
+	_check(view.is_in_flight(), "killed flight still claims to be in flight")
+	view.move_to(slot["position"], slot["rotation"], slot["z"], true)
+	yield(_advance(1.5), "completed")
+	_check(not view.is_in_flight() and abs(view.modulate.a - 1.0) < 0.01,
+		"a dead tween does not defer the re-layout")
+	_check(view.z_index == slot["z"], "the card re-lands in its resting band")
+
+	# Hover traffic never lifts a flying card out of the flight band.
+	view.deal_from(_game._deck_position(), slot["position"], slot["rotation"], slot["z"], 0.0)
+	view._on_mouse_entered()
+	_check(view.z_index == DrawOrder.FLYING, "hover does not lift a flying card to the hover band")
+	view._on_mouse_exited()
+	_check(view.z_index == DrawOrder.FLYING, "hover exit keeps a flying card in the flight band")
+	yield(_advance(1.5), "completed")
+	_check(not view.is_in_flight() and abs(view.modulate.a - 1.0) < 0.01
+		and view.z_index == slot["z"],
+		"the flight lands cleanly through hover traffic")
+
+	# Restore the fan.
+	_game._refresh_all()
+	yield(_wait(), "completed")

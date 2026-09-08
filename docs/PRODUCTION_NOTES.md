@@ -36,6 +36,7 @@ headless test suites or the layout preview renderer.
 | **A refresh stomped the hovered card's depth** (found by running) | Any event-batch refresh reset a hovered card's z to its resting depth while it was still lifted, dropping it under its neighbours until the mouse moved again. `move_to()` now defers to the hover (and drag) state. |
 | **Invalid native icon on Windows** | `config/windows_native_icon` pointed at `icon.png`; the Windows loader expects a real `.ico`, and boot failed its `idType != 1` check on the PNG header. Shipped a proper DIB-encoded `icon.ico` (16–64 px, 32 bpp) generated from the same artwork. |
 | Editor script warnings | Two unused locals (`TableLayout.metrics()`, `AudioDirector._make_card_draw()`) and six HUD signals emitted through a variable — `emit_signal(signal_name)` — which the 3.5 parser cannot see, so it reported them as never emitted. Buttons now dispatch through a `match` that emits each signal by literal, and the dead `_on_button_hover` stub (GameController already plays the hover cue on those buttons) is gone. |
+| **Ghost cards hung the game** (found by running) | Three paths could interrupt a card's deal flight and leave it stranded: a re-layout while the fan re-flowed killed the fade-in (a permanent near-invisible card), a rejection shake on a card still flying in left it stuck in the flight band above the fan — floating there and swallowing clicks meant for the cards beneath, which reads as "the game hangs" until a pause/resume (whose refresh, plus the mouse crossing the cards afterwards, re-lays the hand) — and `move_to()` kept deferring to flight tweens that were already dead, because `SceneTreeTween.kill()` does not clear `is_valid()`. Every interruption now lands the card: re-targets finish an interrupted fade, the shake restores pose/opacity/flight state, liveness is judged by `is_running()`, and `_settle()` guarantees a landed card is opaque. A soak probe (`Tests/HangProbe.gd`) drives the real input path — hovers, clicks, drags, misclicks, UNO-less play — across opponent/animation/rule configs and flags any hand card that is off-slot, invisible, transparent or stuck in flight. |
 | Use-after-free | Culled discard views could still be reached by a pending click or timer. Guarded with `is_instance_valid()`. |
 
 ## Performance
@@ -63,13 +64,13 @@ headless test suites or the layout preview renderer.
 
 ## Testing
 
-3105 assertions across four headless suites, all wired into CI:
+3121 assertions across four headless suites, all wired into CI:
 
 | Suite | Assertions | Scope |
 | --- | --- | --- |
 | `TestRules.gd` | 370 | Rules engine, AI legality, card conservation, 100-game seeded soak. |
 | `TestLayout.gd` | 2644 | Geometry at 7 resolutions × 7 hand sizes, text fit, glyph coverage. |
-| `TestDrawOrder.gd` | 35 | Canvas strata, z bands, the pile's play order, cards in transit, hover/drag depth, pathological hand sizes. |
+| `TestDrawOrder.gd` | 51 | Canvas strata, z bands, the pile's play order, cards in transit, hover/drag depth, pathological hand sizes, interrupted-flight healing. |
 | `TestIntegration.gd` | 56 | Boots the real scene: menus, settings, save/reload, full matches, 3- and 4-handed play, house rules, resizes, pause, teardown. |
 
 Every suite exits non-zero on failure. Verified by deliberately introducing a
