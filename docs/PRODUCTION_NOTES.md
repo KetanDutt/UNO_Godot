@@ -147,6 +147,10 @@ numeric assertions had flagged. Every one of those became a test afterwards.
    translation table would be mechanical.
 4. **Touch tuning.** Hit targets scale with the layout, but a dedicated phone
    portrait layout would need a new band arrangement in `TableLayout`.
+5. **Boot-time audio synthesis.** Every SFX sample is generated in GDScript
+   during `_ready()` — a one-time hitch of roughly a tenth of a second on a
+   slow machine. Deferring stream generation to first use (or a thread) would
+   shave the boot; not measured as a problem on the machines tested.
 
 Jump-in (previously item 3) shipped in v1.1.0, with rules, AI, HUD, help text,
 three rules tests and five integration assertions covering it.
