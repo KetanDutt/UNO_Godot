@@ -232,3 +232,21 @@ func should_catch_uno() -> bool:
 # Delay before the catch fires, giving the human a fair window to self-call.
 func catch_delay() -> float:
 	return [2.2, 1.5, 1.0][int(clamp(difficulty, 0, 2))]
+
+
+# Should the AI jump in with an identical card out of turn? Easier opponents
+# are slower to spot the opening.
+func should_jump_in() -> bool:
+	match difficulty:
+		Difficulty.EASY:
+			return _rng.randf() < 0.35
+		Difficulty.NORMAL:
+			return _rng.randf() < 0.8
+		_:
+			return true
+
+
+# Reaction time before an AI jump-in lands, so the human can beat them to it.
+func jump_in_delay() -> float:
+	var base = [0.95, 0.75, 0.55][int(clamp(difficulty, 0, 2))]
+	return base + _rng.randf_range(-0.1, 0.25)

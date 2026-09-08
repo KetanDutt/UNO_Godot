@@ -61,6 +61,11 @@ var rest_position: Vector2 = Vector2.ZERO
 var rest_rotation: float = 0.0
 var rest_z: int = 0
 
+# Cards on the discard pile rest at the pile centre plus this hand-stacked
+# jitter. It is stored so a window resize can re-place the pile without
+# snapping every card to the exact same spot.
+var discard_offset: Vector2 = Vector2.ZERO
+
 # True between the start of a deal/draw/play flight and the moment it lands.
 # While set, the card draws in the DrawOrder.FLYING band (see _settle).
 var _in_flight: bool = false
@@ -75,6 +80,7 @@ var _hover_tween = null
 var _move_tween = null
 var _flip_tween = null
 var _pulse_tween = null
+var _glow_fade_tween = null
 
 var _is_hovered: bool = false
 var _is_dragging: bool = false
@@ -239,11 +245,16 @@ func _update_glow() -> void:
 	if _pulse_tween != null and _pulse_tween.is_valid():
 		_pulse_tween.kill()
 		_pulse_tween = null
+	if _glow_fade_tween != null and _glow_fade_tween.is_valid():
+		# An in-flight fade-out would otherwise land its final alpha on top of
+		# a freshly started pulse.
+		_glow_fade_tween.kill()
+		_glow_fade_tween = null
 
 	var show_glow = playable and interactive
 	if not show_glow and not focused:
-		var fade = create_tween()
-		fade.tween_property(_glow, "modulate:a", 0.0, _anim(0.16))
+		_glow_fade_tween = create_tween()
+		_glow_fade_tween.tween_property(_glow, "modulate:a", 0.0, _anim(0.16))
 		return
 
 	var tint = CardTypes.color_value(card_data.effective_color()) if card_data != null else Color.white
@@ -317,6 +328,17 @@ func move_to(target: Vector2, target_rotation: float, z: int,
 
 	# A drag owns the card completely; a re-layout must not fight it.
 	if _is_dragging or en_route:
+		return
+
+	# Already parked at exactly this pose? A refresh runs after every event
+	# batch; without this check each one would restart an identical 0.34s
+	# tween per resting card for as long as the round lasts.
+	if animated and not _is_hovered and not _in_flight \
+			and position.distance_to(target) < 0.5 \
+			and abs(rotation_degrees - target_rotation) < 0.5 \
+			and scale.distance_to(_base()) < 0.02 \
+			and z_index == _hover_or_rest_z() \
+			and modulate.a > 0.999:
 		return
 
 	if _move_tween != null and _move_tween.is_valid():
@@ -414,10 +436,14 @@ func play_to(target: Vector2, target_rotation: float, z: int,
 		.set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
 	_move_tween.tween_property(self, "rotation_degrees", target_rotation, duration) \
 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	# Lift then settle sells the "throw" onto the pile.
+	# Lift, then squash on landing: the card hits the pile, dips and settles
+	# back to its rest scale. The squash sells the impact far better than a
+	# plain ease-out.
 	_move_tween.tween_property(self, "scale", _base() * 1.16, duration * 0.45) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	_move_tween.chain().tween_property(self, "scale", _base(), duration * 0.5) \
+	_move_tween.chain().tween_property(self, "scale", _base() * Vector2(1.06, 0.93), duration * 0.22) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_move_tween.chain().tween_property(self, "scale", _base(), duration * 0.3) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_move_tween.chain().tween_callback(self, "_settle")
 	if on_complete_target != null and on_complete_method != "":
@@ -445,10 +471,9 @@ func fly_out(target: Vector2) -> void:
 # Pseudo-3D flip: squash horizontally to zero, swap the texture at the midpoint,
 # then expand again.
 func flip_to(show_face: bool, duration: float = 0.34) -> void:
-	if face_down != show_face:
-		# Already showing the requested side.
-		if (show_face and not face_down) or (not show_face and face_down):
-			return
+	# Already showing the requested side? Nothing to flip.
+	if face_down == (not show_face):
+		return
 
 	if _flip_tween != null and _flip_tween.is_valid():
 		_flip_tween.kill()

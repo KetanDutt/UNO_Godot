@@ -55,15 +55,25 @@ const HELP_UNO = \
 const HELP_SCORING = \
 	"Number cards score their face value. Skip, Reverse and Draw Two score 20. Wild and " + \
 	"Wild Draw Four score 50."
+const HELP_HOUSE_RULES = \
+	"The SETTINGS screen can switch on five optional house rules:\n" + \
+	"Stack +2 / +4 - the victim may answer a draw card with their own and pass the " + \
+	"growing pile along.\n" + \
+	"Draw until playable - drawing keeps going until something legal turns up.\n" + \
+	"Seven-Zero - a 7 swaps hands, a 0 rotates every hand.\n" + \
+	"Force play - you must play when you hold a legal card.\n" + \
+	"Jump-in - a card identical to the top of the pile (same colour AND value) may be " + \
+	"played out of turn by anyone, including you. Play then resumes from the jumper."
 const HELP_CONTROLS = \
-	"Mouse / touch - click or drag a card. Hover to preview.\n" + \
-	"Keyboard - Left/Right select, Enter or Space plays, D draws, P passes, U calls UNO, " + \
-	"C catches, S sorts, Esc pauses.\n" + \
-	"Gamepad - D-pad or stick selects, A plays, X draws, Y passes, RB calls UNO, LB " + \
-	"sorts, B or Start pauses."
+	"Remote / gamepad - D-pad moves, Enter or A confirms, Back pauses. In your " + \
+	"hand, Up jumps to the action buttons; Up again returns to your cards.\n" + \
+	"Mouse / touch - click or drag a card onto the pile. Hover to preview.\n" + \
+	"Keyboard - Left/Right select, Enter or Space plays, D draws, P passes, U calls " + \
+	"UNO, C catches, S sorts, Esc pauses."
 
 var current_screen: String = SCREEN_NONE
 
+var _root: Control = null
 var _dim: ColorRect = null
 var _screens: Dictionary = {}
 var _first_focus: Dictionary = {}
@@ -106,6 +116,7 @@ func build(settings_ref, theme: Theme) -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_STOP
 	root.theme = theme
 	add_child(root)
+	_root = root
 
 	_dim = ColorRect.new()
 	_dim.name = "Dim"
@@ -124,6 +135,12 @@ func build(settings_ref, theme: Theme) -> void:
 	_build_match_over(root)
 
 	hide_all(true)
+
+
+# Swap the theme live (the high-contrast toggle), without rebuilding widgets.
+func apply_theme(theme: Theme) -> void:
+	if _root != null:
+		_root.theme = theme
 
 
 # ---------------------------------------------------------------------------
@@ -222,10 +239,18 @@ func _build_main(root: Control) -> void:
 	if OS.get_name() != "HTML5":
 		box.add_child(_make_button("QUIT", "_on_quit_game"))
 
-	var hint = _make_body("Arrows / D-pad to navigate  -  Enter or A to confirm", 14)
+	var hint = _make_body("D-pad to navigate  -  Enter to confirm  -  Back to pause", 14)
 	hint.add_color_override("font_color", ThemeFactory.INK_FAINT)
 	box.add_child(_spacer(6))
 	box.add_child(hint)
+
+	# Small print: the running version, sourced from project.godot.
+	if ProjectSettings.has_setting("application/config/version"):
+		var version = str(ProjectSettings.get_setting("application/config/version"))
+		if version != "":
+			var label = _make_body("v" + version, 13)
+			label.add_color_override("font_color", ThemeFactory.INK_FAINT)
+			box.add_child(label)
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +312,8 @@ func _build_settings(root: Control) -> void:
 		"Playing a 7 swaps hands; playing a 0 rotates every hand around the table.")
 	_rule_buttons["force_play"] = _add_toggle(box, "Force play", "_on_toggle_rule", ["force_play"],
 		"You must play a legal card if you hold one - no drawing to stall.")
+	_rule_buttons["jump_in"] = _add_toggle(box, "Jump-in", "_on_toggle_rule", ["jump_in"],
+		"A card identical to the top of the pile may be played out of turn - by anyone.")
 
 	box.add_child(_section_header("PRESENTATION"))
 	_speed_button = _add_cycle(box, "Animation speed", "_on_cycle_speed")
@@ -406,6 +433,9 @@ func _build_help(root: Control) -> void:
 	box.add_child(_help_heading("Scoring"))
 	box.add_child(_help_text(HELP_SCORING))
 
+	box.add_child(_help_heading("House rules"))
+	box.add_child(_help_text(HELP_HOUSE_RULES))
+
 	box.add_child(_help_heading("Controls"))
 	box.add_child(_help_text(HELP_CONTROLS))
 
@@ -459,8 +489,10 @@ func _refresh_stats() -> void:
 	var lines = [
 		"Matches played        %d" % settings.stat_games_played,
 		"Matches won           %d" % settings.stat_games_won,
-		"Win rate              %.0f%%" % settings.win_rate(),
+		"Match win rate        %.0f%%" % settings.win_rate(),
+		"Rounds played         %d" % settings.stat_rounds_played,
 		"Rounds won            %d" % settings.stat_rounds_won,
+		"Round win rate        %.0f%%" % settings.round_win_rate(),
 		"Cards played          %d" % settings.stat_cards_played,
 		"UNO calls             %d" % settings.stat_uno_calls,
 		"Best round score      %d" % settings.stat_best_score
@@ -648,6 +680,7 @@ func refresh_settings_labels() -> void:
 	_set_toggle(_rule_buttons, "draw_until", settings.rule_draw_until_playable)
 	_set_toggle(_rule_buttons, "seven_zero", settings.rule_seven_zero)
 	_set_toggle(_rule_buttons, "force_play", settings.rule_force_play)
+	_set_toggle(_rule_buttons, "jump_in", settings.rule_jump_in)
 
 	_set_toggle(_toggle_buttons, "hints", settings.show_hints)
 	_set_toggle(_toggle_buttons, "glyphs", settings.colorblind_glyphs)
@@ -736,6 +769,8 @@ func _on_toggle_rule(key: String) -> void:
 			settings.rule_seven_zero = not settings.rule_seven_zero
 		"force_play":
 			settings.rule_force_play = not settings.rule_force_play
+		"jump_in":
+			settings.rule_jump_in = not settings.rule_jump_in
 	_commit_settings()
 
 

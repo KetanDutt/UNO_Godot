@@ -197,6 +197,15 @@ static func discard_position(viewport: Vector2) -> Vector2:
 	return Vector2(play_center_x(viewport), deck_row_y(viewport))
 
 
+# Radius of the turn-direction ring that circles the discard pile. It must
+# clear the pile's most tilted card; sliding a little way under the deck backs
+# is fine (the ring paints below the deck's z band and they never collide
+# visually).
+static func turn_ring_radius(viewport: Vector2) -> float:
+	var s = scale_factor(viewport)
+	return rotated_half_height(player_card_scale(viewport)) + 16.0 * s
+
+
 # --- hands -----------------------------------------------------------------
 static func player_anchor(viewport: Vector2) -> Vector2:
 	return Vector2(play_center_x(viewport), metrics(viewport)["player_center_y"])

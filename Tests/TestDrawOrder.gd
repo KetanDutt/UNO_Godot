@@ -244,6 +244,19 @@ func _test_pile_play_order() -> void:
 		yield(_take_turn(), "completed")
 
 	var pile = _game._discard_views
+	# A card thrown at the pile sits in the FLYING band until its tween lands
+	# it in the discard band - by design. An opponent can play arbitrarily late
+	# inside the 0.5 s turn window, so wait for any in-flight pile card to land
+	# before sampling depths (bounded, like every wait in this suite).
+	for _s in range(40):
+		var any_flying = false
+		for view in pile:
+			if is_instance_valid(view) and view.is_in_flight():
+				any_flying = true
+				break
+		if not any_flying:
+			break
+		yield(_advance(0.05), "completed")
 	_check(pile.size() > 3, "several discards accumulated (%d views)" % pile.size())
 	var strictly_rising = true
 	for i in range(pile.size() - 1):

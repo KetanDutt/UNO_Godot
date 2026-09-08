@@ -50,6 +50,9 @@ func _init() -> void:
 	_run("Match ends at target score", "test_match_end")
 	_run("Seven-zero swap", "test_seven_zero")
 	_run("Force play blocks drawing", "test_force_play")
+	_run("Jump-in legality", "test_jump_in_legality")
+	_run("Jump-in steals the turn", "test_jump_in_turn_flow")
+	_run("Jump-in needs the rule enabled", "test_jump_in_disabled")
 	_run("Deck never returns duplicate uids", "test_unique_uids")
 	_run("AI always picks a legal card", "test_ai_legal")
 	_run("Full AI match completes", "test_full_game_simulation")
@@ -523,6 +526,105 @@ func test_force_play() -> void:
 
 	rules.hands[0] = [_card(CardTypes.CardColor.BLUE, CardTypes.CardValue.N2, 2)]
 	_check(rules.can_draw(0), "may draw with no legal card")
+
+
+# ---------------------------------------------------------------------------
+# Jump-in
+# ---------------------------------------------------------------------------
+func test_jump_in_legality() -> void:
+	var ruleset = GameRules.Ruleset.new()
+	ruleset.jump_in = true
+	var rules = _fresh(3, ruleset)
+
+	# Three players; seat 0 is on turn and plays a Red 5 onto a Red 3.
+	_stage(rules, 0, [
+		_card(CardTypes.CardColor.RED, CardTypes.CardValue.N5, 1),
+		_card(CardTypes.CardColor.GREEN, CardTypes.CardValue.N2, 2)
+	], CardTypes.CardColor.RED, CardTypes.CardValue.N3)
+	rules.play_card(0, rules.hands[0][0])
+	_eq(rules.current_player, 1, "turn passed to seat 1")
+	rules.consume_events()
+
+	# Seat 2 holds an exact twin, a near miss, and a wild.
+	var twin = _card(CardTypes.CardColor.RED, CardTypes.CardValue.N5, 10)
+	var near = _card(CardTypes.CardColor.GREEN, CardTypes.CardValue.N5, 11)
+	var wild = _card(CardTypes.CardColor.WILD, CardTypes.CardValue.WILD, 12)
+	rules.hands[2] = [twin, near, wild]
+
+	_check(rules.can_jump_in(2, twin), "exact twin may jump in")
+	_check(not rules.can_jump_in(2, near), "same value, wrong colour may not")
+	_check(not rules.can_jump_in(2, wild), "wilds may never jump in")
+	_check(not rules.can_jump_in(1, twin), "a card not in the seat's hand is not a jump-in")
+	_check(not rules.can_jump_in(2, _card(CardTypes.CardColor.RED, CardTypes.CardValue.N5, 99)),
+		"an unknown card object is not a jump-in")
+
+	# A live draw stack blocks jump-ins entirely.
+	rules.pending_draw = 2
+	_check(not rules.can_jump_in(2, twin), "no jump-in into a draw stack")
+	rules.pending_draw = 0
+
+	# The untouched opening card cannot be jumped in on, even by an exact twin.
+	rules.deck.discard_pile = [_card(CardTypes.CardColor.RED, CardTypes.CardValue.N5, 50)]
+	rules.active_color = CardTypes.CardColor.RED
+	_check(not rules.can_jump_in(2, twin), "no jump-in on the untouched opening card")
+
+	# Once a real play covers the opening card, the same twin becomes legal.
+	rules.deck.discard_pile = [
+		_card(CardTypes.CardColor.BLUE, CardTypes.CardValue.N1, 51),
+		_card(CardTypes.CardColor.RED, CardTypes.CardValue.N5, 52)]
+	rules.active_color = CardTypes.CardColor.RED
+	_check(rules.can_jump_in(2, twin), "twin of a genuinely played top card is legal")
+
+
+func test_jump_in_turn_flow() -> void:
+	var ruleset = GameRules.Ruleset.new()
+	ruleset.jump_in = true
+	var rules = _fresh(3, ruleset)
+
+	_stage(rules, 0, [
+		_card(CardTypes.CardColor.RED, CardTypes.CardValue.N5, 1),
+		_card(CardTypes.CardColor.GREEN, CardTypes.CardValue.N2, 2)
+	], CardTypes.CardColor.RED, CardTypes.CardValue.N3)
+	rules.play_card(0, rules.hands[0][0])
+	rules.consume_events()
+	_eq(rules.current_player, 1, "seat 1 is on turn")
+
+	var twin = _card(CardTypes.CardColor.RED, CardTypes.CardValue.N5, 10)
+	rules.hands[2] = [twin, _card(CardTypes.CardColor.BLUE, CardTypes.CardValue.N8, 11)]
+	var played_before = rules.stats_cards_played[2]
+
+	_check(rules.play_card(2, twin), "out-of-turn twin is accepted")
+	var events = rules.consume_events()
+	var played = _find_event(events, GameRules.Event.CARD_PLAYED)
+	_check(played != null and played.get("jump_in", false), "CARD_PLAYED is flagged as a jump-in")
+	_eq(rules.current_player, 0, "play resumes from the seat after the jumper")
+	_eq(rules.stats_cards_played[2], played_before + 1, "jump-in counts as a play")
+	_eq(rules.hand_size(2), 1, "jump-in card left the hand")
+
+	# A jump-in down to one card still exposes the player to a catch.
+	_check(rules.uno_vulnerable[2], "silent jump-in to one card is catchable")
+
+
+func test_jump_in_disabled() -> void:
+	var ruleset = GameRules.Ruleset.new()
+	ruleset.jump_in = false
+	var rules = _fresh(3, ruleset)
+
+	_stage(rules, 0, [
+		_card(CardTypes.CardColor.RED, CardTypes.CardValue.N5, 1),
+		_card(CardTypes.CardColor.GREEN, CardTypes.CardValue.N2, 2)
+	], CardTypes.CardColor.RED, CardTypes.CardValue.N3)
+	rules.play_card(0, rules.hands[0][0])
+	rules.consume_events()
+
+	var twin = _card(CardTypes.CardColor.RED, CardTypes.CardValue.N5, 10)
+	rules.hands[2] = [twin]
+	_check(not rules.can_jump_in(2, twin), "jump-in is illegal with the rule off")
+	_check(not rules.play_card(2, twin), "out-of-turn play is rejected with the rule off")
+	var events = rules.consume_events()
+	var invalid = _find_event(events, GameRules.Event.INVALID_MOVE)
+	_check(invalid != null and invalid.get("reason", "") == "not_your_turn",
+		"rejection reports not_your_turn")
 
 
 # ---------------------------------------------------------------------------

@@ -13,21 +13,19 @@ config_version=4
 config/name="UNO"
 config/description="A polished single-player UNO card game built with Godot 3."
 run/main_scene="res://Scenes/Gameplay.tscn"
+boot_splash/show_image=false
+boot_splash/bg_color=Color( 0.06, 0.07, 0.1, 1 )
 config/icon="res://icon.png"
 config/windows_native_icon="res://icon.ico"
-boot_splash/bg_color=Color( 0.06, 0.07, 0.1, 1 )
-boot_splash/show_image=false
+config/version="1.2.0"
 
 [display]
 
 window/size/width=1280
 window/size/height=720
-window/size/resizable=true
 window/dpi/allow_hidpi=true
-window/handheld/orientation="landscape"
 window/stretch/mode="2d"
 window/stretch/aspect="expand"
-window/vsync/use_vsync=true
 
 [gui]
 
@@ -36,8 +34,6 @@ theme/use_hidpi=true
 
 [input]
 
-; Explicit actions keep keyboard, gamepad and TV-remote input consistent
-; instead of relying on scancode checks scattered through the code.
 ui_accept={
 "deadzone": 0.5,
 "events": [ Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":0,"alt":false,"shift":false,"control":false,"meta":false,"command":false,"pressed":false,"scancode":16777221,"physical_scancode":0,"unicode":0,"echo":false,"script":null)
@@ -52,35 +48,6 @@ ui_cancel={
 , Object(InputEventJoypadButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"button_index":1,"pressure":0.0,"pressed":false,"script":null)
  ]
 }
-game_draw={
-"deadzone": 0.5,
-"events": [ Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":0,"alt":false,"shift":false,"control":false,"meta":false,"command":false,"pressed":false,"scancode":68,"physical_scancode":0,"unicode":0,"echo":false,"script":null)
-, Object(InputEventJoypadButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"button_index":2,"pressure":0.0,"pressed":false,"script":null)
- ]
-}
-game_pass={
-"deadzone": 0.5,
-"events": [ Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":0,"alt":false,"shift":false,"control":false,"meta":false,"command":false,"pressed":false,"scancode":80,"physical_scancode":0,"unicode":0,"echo":false,"script":null)
-, Object(InputEventJoypadButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"button_index":3,"pressure":0.0,"pressed":false,"script":null)
- ]
-}
-game_uno={
-"deadzone": 0.5,
-"events": [ Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":0,"alt":false,"shift":false,"control":false,"meta":false,"command":false,"pressed":false,"scancode":85,"physical_scancode":0,"unicode":0,"echo":false,"script":null)
-, Object(InputEventJoypadButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"button_index":5,"pressure":0.0,"pressed":false,"script":null)
- ]
-}
-game_catch={
-"deadzone": 0.5,
-"events": [ Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":0,"alt":false,"shift":false,"control":false,"meta":false,"command":false,"pressed":false,"scancode":67,"physical_scancode":0,"unicode":0,"echo":false,"script":null)
- ]
-}
-game_sort={
-"deadzone": 0.5,
-"events": [ Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":0,"alt":false,"shift":false,"control":false,"meta":false,"command":false,"pressed":false,"scancode":83,"physical_scancode":0,"unicode":0,"echo":false,"script":null)
-, Object(InputEventJoypadButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"button_index":4,"pressure":0.0,"pressed":false,"script":null)
- ]
-}
 
 [physics]
 
@@ -89,8 +56,9 @@ common/enable_pause_aware_picking=true
 [rendering]
 
 quality/driver/driver_name="GLES2"
+2d/snapping/use_gpu_pixel_snap=true
 vram_compression/import_etc=true
 vram_compression/import_etc2=false
-quality/2d/use_pixel_snap=true
 environment/default_clear_color=Color( 0.06, 0.07, 0.1, 1 )
 quality/filters/msaa=2
+quality/2d/use_pixel_snap=true
