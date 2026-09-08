@@ -81,11 +81,16 @@ func _wait(frames: int = 2) -> void:
 		yield(self, "idle_frame")
 
 
+# Wait in *real* time, not frame counts. A headless main loop can tick at
+# hundreds of iterations per second with sub-millisecond deltas, so a
+# frame-counted wait may advance no tween, timer or AI turn at all before the
+# assertions run. Everything this suite waits for is driven by real time
+# (tweens, SceneTreeTimers), so real time is the correct clock.
 func _advance(seconds: float) -> void:
-	var elapsed = 0.0
-	while elapsed < seconds:
+	var deadline = OS.get_ticks_msec() + int(seconds * 1000.0)
+	yield(self, "idle_frame")
+	while OS.get_ticks_msec() < deadline:
 		yield(self, "idle_frame")
-		elapsed += 0.016
 
 
 func _finish() -> void:
@@ -227,7 +232,11 @@ func _test_deal_bands() -> void:
 # ordered by play, and its top must be the logical top of the discard.
 func _test_pile_play_order() -> void:
 	print("-- discard pile paints in play order --")
-	for i in range(24):
+	# Enough plays to push the pile past its cull limit, where the old code
+	# saturated every discard onto the same z. Stop as soon as we have them.
+	for _i in range(24):
+		if _game.rules.deck.discard_count() >= 9:
+			break
 		if not _game.rules.round_active:
 			_game._on_start_game()
 			yield(_advance(1.5), "completed")
