@@ -9,6 +9,7 @@ signal color_selected(color)
 
 const CardTypes = preload("res://Scripts/Core/CardTypes.gd")
 const ThemeFactory = preload("res://Scripts/Systems/ThemeFactory.gd")
+const DrawOrder = preload("res://Scripts/UI/DrawOrder.gd")
 
 var settings = null
 

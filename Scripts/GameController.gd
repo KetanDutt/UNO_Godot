@@ -18,6 +18,7 @@ const AIPlayer = preload("res://Scripts/Core/AIPlayer.gd")
 
 const CardView = preload("res://Scripts/UI/CardView.gd")
 const TableLayout = preload("res://Scripts/UI/TableLayout.gd")
+const DrawOrder = preload("res://Scripts/UI/DrawOrder.gd")
 const EventPresenter = preload("res://Scripts/UI/EventPresenter.gd")
 const HudLayer = preload("res://Scripts/UI/HudLayer.gd")
 const MenuLayer = preload("res://Scripts/UI/MenuLayer.gd")
@@ -117,6 +118,7 @@ func _setup_scene() -> void:
 	_table = Sprite.new()
 	_table.name = "Table"
 	_table.centered = false
+	_table.z_index = DrawOrder.TABLE
 	_shake_root.add_child(_table)
 	_apply_table_texture()
 
@@ -148,14 +150,15 @@ func _setup_ui() -> void:
 	add_child(menus)
 	menus.build(settings, _theme)
 
-	# Flash overlay sits above the table but below menus.
+	# Flash overlay sits above the world and the HUD, below the picker and menus.
 	var flash_host = Control.new()
 	flash_host.name = "FlashHost"
 	flash_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	flash_host.anchor_right = 1.0
 	flash_host.anchor_bottom = 1.0
 	var flash_layer = CanvasLayer.new()
-	flash_layer.layer = 8
+	flash_layer.name = "FlashLayer"
+	flash_layer.layer = DrawOrder.LAYER_FLASH
 	flash_layer.add_child(flash_host)
 	add_child(flash_layer)
 	effects.attach_overlays(flash_host)
@@ -245,12 +248,12 @@ func _build_deck_stack() -> void:
 	for child in _deck_stack.get_children():
 		child.queue_free()
 	var card_scale = TableLayout.player_card_scale(_viewport_size())
-	for i in range(5):
+	for i in range(DrawOrder.DECK_DEPTH):
 		var sprite = Sprite.new()
 		sprite.texture = _back_texture
 		sprite.scale = Vector2(card_scale, card_scale)
 		sprite.position = Vector2(-i * 1.5, -i * 3.0)
-		sprite.z_index = i
+		sprite.z_index = DrawOrder.deck_back(i)
 		_deck_stack.add_child(sprite)
 
 	# A clickable hotspot so players can tap the deck to draw.
@@ -423,22 +426,56 @@ func _anchor_for(player: int) -> Vector2:
 	return TableLayout.opponent_anchor(size, player - 1, rules.player_count() - 1)
 
 
+# The fan slots for one hand: position, rotation and index for every card.
+func _fan_layout(player: int) -> Array:
+	var size = _viewport_size()
+	var is_local = player == 0
+	var anchor = _anchor_for(player)
+	var card_scale = TableLayout.player_card_scale(size) if is_local \
+		else TableLayout.opponent_card_scale(size)
+	var width = TableLayout.player_fan_width(size) if is_local \
+		else TableLayout.opponent_fan_width(size, rules.player_count() - 1)
+	return TableLayout.fan(anchor, rules.hands[player].size(), width, is_local, card_scale)
+
+
+# The slot a single card occupies in its hand's fan, including the rendered
+# card scale and the DrawOrder depth it rests at. Dealt and drawn cards are
+# sent straight here so their flight lands on the exact slot the layout
+# solver expects - the refresh that follows then recognises the flight and
+# leaves the stagger alone instead of collapsing it.
+func _fan_slot(player: int, index: int) -> Dictionary:
+	var size = _viewport_size()
+	var card_scale = TableLayout.player_card_scale(size) if player == 0 \
+		else TableLayout.opponent_card_scale(size)
+	var layout = _fan_layout(player)
+	if layout.empty():
+		return {
+			"position": _anchor_for(player),
+			"rotation": 0.0,
+			"z": DrawOrder.hand(0),
+			"scale": card_scale
+		}
+	var slot = layout[clamp(index, 0, layout.size() - 1)]
+	return {
+		"position": slot["position"],
+		"rotation": slot["rotation"],
+		"z": DrawOrder.hand(slot["z"]),
+		"scale": card_scale
+	}
+
+
 # Position every card in every hand according to the fan layout.
 func _layout_hands(animated: bool = true) -> void:
 	if rules == null:
 		return
 	var size = _viewport_size()
 
-	var opponents = rules.player_count() - 1
 	for player in range(rules.player_count()):
 		var hand = rules.hands[player]
 		var is_local = player == 0
-		var anchor = _anchor_for(player)
 		var card_scale = TableLayout.player_card_scale(size) if is_local \
 			else TableLayout.opponent_card_scale(size)
-		var width = TableLayout.player_fan_width(size) if is_local \
-			else TableLayout.opponent_fan_width(size, opponents)
-		var layout = TableLayout.fan(anchor, hand.size(), width, is_local, card_scale)
+		var layout = _fan_layout(player)
 
 		for i in range(hand.size()):
 			var card = hand[i]
@@ -449,7 +486,7 @@ func _layout_hands(animated: bool = true) -> void:
 				continue
 			var slot = layout[i]
 			view.set_card_scale(card_scale)
-			view.move_to(slot["position"], slot["rotation"], slot["z"], animated)
+			view.move_to(slot["position"], slot["rotation"], DrawOrder.hand(slot["z"]), animated)
 
 
 # ---------------------------------------------------------------------------

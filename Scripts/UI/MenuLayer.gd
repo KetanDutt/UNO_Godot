@@ -20,6 +20,7 @@ signal screen_changed(screen)
 const ThemeFactory = preload("res://Scripts/Systems/ThemeFactory.gd")
 const CardTypes = preload("res://Scripts/Core/CardTypes.gd")
 const AIPlayer = preload("res://Scripts/Core/AIPlayer.gd")
+const DrawOrder = preload("res://Scripts/UI/DrawOrder.gd")
 
 const SCREEN_NONE = ""
 const SCREEN_MAIN = "main"

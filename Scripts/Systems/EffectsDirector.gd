@@ -10,7 +10,10 @@ extends Node2D
 #     tree during penalty draws.
 #   * Every effect respects the `particles_enabled` / `screen_shake` settings so
 #     low-end and motion-sensitive players can turn them off.
-#   * Effects draw above the table but below the HUD (see z_index in setup).
+#   * Effects draw above every card (resting, flying, hovered or dragged) in
+#     the DrawOrder.EFFECTS band, but below the HUD's CanvasLayer.
+
+const DrawOrder = preload("res://Scripts/UI/DrawOrder.gd")
 
 const POOL_SIZE = 10
 const FLOAT_TEXT_POOL = 8
@@ -34,7 +37,7 @@ var _vignette: ColorRect = null
 
 func _ready() -> void:
 	name = "EffectsDirector"
-	z_index = 90
+	z_index = DrawOrder.EFFECTS
 	_build_pools()
 	set_process(true)
 
@@ -62,7 +65,7 @@ func _build_pools() -> void:
 		particles.emitting = false
 		particles.one_shot = true
 		particles.local_coords = false
-		particles.z_index = 5
+		particles.z_index = DrawOrder.FX_PARTICLES
 		add_child(particles)
 		_particle_pool.append(particles)
 
@@ -70,7 +73,7 @@ func _build_pools() -> void:
 	# the z_index (Control has no z_index of its own in Godot 3).
 	var text_host = Node2D.new()
 	text_host.name = "FloatTextHost"
-	text_host.z_index = 20
+	text_host.z_index = DrawOrder.FX_TEXT
 	add_child(text_host)
 
 	for i in range(FLOAT_TEXT_POOL):

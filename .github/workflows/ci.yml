@@ -59,5 +59,8 @@ jobs:
       - name: Layout tests
         run: ~/godot/godot --no-window -s Tests/TestLayout.gd
 
+      - name: Draw-order tests
+        run: ~/godot/godot --no-window -s Tests/TestDrawOrder.gd
+
       - name: Integration tests
         run: ~/godot/godot --no-window -s Tests/TestIntegration.gd

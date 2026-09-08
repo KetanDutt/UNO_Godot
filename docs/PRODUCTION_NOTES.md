@@ -30,6 +30,10 @@ headless test suites or the layout preview renderer.
 | **Scoreboard overflow** (found by running) | At 800×480 the `ROUND n - FIRST TO 500` header rendered wider than its panel and ran off the right edge. It now abbreviates, and a test asserts every HUD string fits its rectangle. |
 | Resize handled one node | `_on_viewport_size_changed()` repositioned only the top centre card. |
 | Card view defects | Hover scaling restored on non-playable cards; `set_interaction_enabled(false)` called `stop_all()` and could strand a card mid-flight; stale `home_position` after a resize; a permanent `raise()` broke fan z-order; the face texture was assigned while the card was still face-down, leaking a one-frame reveal. |
+| **The discard pile painted in deal order** (found by running) | Hand cards and the pile shared the z range 0..29, and every discard past the sixth landed on the same z (10 + pile size, with the pile capped at six). Godot breaks z ties in tree order — spawn order — so a freshly played card slid *under* the card it was supposed to cover. Each group now owns a `DrawOrder` z band, and the pile is re-stamped bottom-to-top on every play. |
+| **Cards in transit drew under the table furniture** (found by running) | A card dealt from the deck flew with its final hand index (z 0..6), i.e. *under* the deck backs (z 1..4), and a card thrown at the pile (z ~10-16) flew under every hand card past index ten. Dealt, drawn and played cards now fly in a dedicated band above everything at rest and settle into their band only on landing. |
+| **The staggered deal never played** (found by running) | `deal_from()` built a delayed, staggered flight, then the `_refresh_all()` at the end of the event batch called `move_to()` on every card, killing each deal tween before a frame rendered — all cards left the deck simultaneously. Dealt cards now fly straight to their fan slot and the layout recognises an in-flight card already heading there. |
+| **A refresh stomped the hovered card's depth** (found by running) | Any event-batch refresh reset a hovered card's z to its resting depth while it was still lifted, dropping it under its neighbours until the mouse moved again. `move_to()` now defers to the hover (and drag) state. |
 | Use-after-free | Culled discard views could still be reached by a pending click or timer. Guarded with `is_instance_valid()`. |
 
 ## Performance
@@ -57,12 +61,13 @@ headless test suites or the layout preview renderer.
 
 ## Testing
 
-3070 assertions across three headless suites, all wired into CI:
+3105 assertions across four headless suites, all wired into CI:
 
 | Suite | Assertions | Scope |
 | --- | --- | --- |
 | `TestRules.gd` | 370 | Rules engine, AI legality, card conservation, 100-game seeded soak. |
 | `TestLayout.gd` | 2644 | Geometry at 7 resolutions × 7 hand sizes, text fit, glyph coverage. |
+| `TestDrawOrder.gd` | 35 | Canvas strata, z bands, the pile's play order, cards in transit, hover/drag depth, pathological hand sizes. |
 | `TestIntegration.gd` | 56 | Boots the real scene: menus, settings, save/reload, full matches, 3- and 4-handed play, house rules, resizes, pause, teardown. |
 
 Every suite exits non-zero on failure. Verified by deliberately introducing a

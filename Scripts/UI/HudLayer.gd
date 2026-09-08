@@ -18,6 +18,7 @@ signal catch_pressed
 const CardTypes = preload("res://Scripts/Core/CardTypes.gd")
 const ThemeFactory = preload("res://Scripts/Systems/ThemeFactory.gd")
 const TableLayout = preload("res://Scripts/UI/TableLayout.gd")
+const DrawOrder = preload("res://Scripts/UI/DrawOrder.gd")
 
 var settings = null
 
