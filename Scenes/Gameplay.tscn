@@ -1,9 +1,5 @@
 [gd_scene load_steps=2 format=2]
 
-; Main scene. Intentionally minimal: GameController builds the table, deck,
-; card views, HUD, menus and effect layers at runtime so layout logic lives in
-; one place and adapts to any resolution.
-
 [ext_resource path="res://Scripts/GameController.gd" type="Script" id=1]
 
 [node name="Game" type="Node2D"]
