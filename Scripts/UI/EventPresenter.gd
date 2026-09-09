@@ -102,7 +102,8 @@ func _on_event_card_dealt(event: Dictionary) -> void:
 
 
 func _schedule_deal_sound(delay: float) -> void:
-	var timer = _game.get_tree().create_timer(delay)
+	# Gameplay timers pause with the tree so a pause menu freezes the deal.
+	var timer = _game.get_tree().create_timer(delay, false)
 	timer.connect("timeout", _game, "_play_cue", ["deal"])
 
 
@@ -122,7 +123,7 @@ func _on_event_opening(event: Dictionary) -> void:
 	var deal_time = _game.settings.anim_scale(0.055) \
 		* _game.rules.player_count() * _game.rules.rules.starting_hand
 	var delay = deal_time + 0.1
-	var timer = _game.get_tree().create_timer(delay)
+	var timer = _game.get_tree().create_timer(delay, false)
 	timer.connect("timeout", self, "_reveal_opening", [view])
 
 
@@ -130,8 +131,11 @@ func _reveal_opening(view) -> void:
 	# The round can end (or restart) before this timer fires.
 	if not is_instance_valid(view):
 		return
-	view.play_to(_game._discard_position(), rand_range(-6, 6), view.rest_z)
+	view.set_card_scale(TableLayout.player_card_scale(_game._viewport_size()))
+	view.discard_offset = Vector2(rand_range(-11, 11), rand_range(-8, 8))
+	view.play_to(_game._discard_position() + view.discard_offset, rand_range(-13, 13), view.rest_z)
 	view.flip_to(true)
+	_game._play_cue("card_flip")
 	_game._play_cue("card_place")
 	_game.effects.burst(_game._discard_position(), CardTypes.color_value(_game.rules.active_color), 18)
 	_game._refresh_all()
@@ -157,18 +161,32 @@ func _on_event_card_played(event: Dictionary) -> void:
 	_cull_discards()
 	_stamp_discard_order()
 
-	# Rotate each discard slightly so the pile looks hand-stacked.
-	var rotation = rand_range(-9, 9)
-	var offset = Vector2(rand_range(-9, 9), rand_range(-7, 7))
+	# The pile is one place with one scale: an opponent's card must not land
+	# smaller than yours just because opponent hands render smaller. Re-base
+	# the view's scale to the discard scale before the throw.
+	view.set_card_scale(TableLayout.player_card_scale(_game._viewport_size()))
+	# Rotate and nudge each discard so the pile looks hand-stacked.
+	var rotation = rand_range(-13, 13)
+	var offset = Vector2(rand_range(-11, 11), rand_range(-8, 8))
+	view.discard_offset = offset
 	view.set_playable(false)
 	view.set_focused(false)
 	if view.face_down:
+		# An opponent's card reveals as it is thrown.
 		view.flip_to(true)
+		_game._play_cue("card_flip", rand_range(0.92, 1.08))
 	view.play_to(_game._discard_position() + offset, rotation, view.rest_z)
 
 	_game._play_cue("card_place", rand_range(0.94, 1.07))
 	var tint = CardTypes.color_value(card.effective_color())
 	_game.effects.burst(_game._discard_position(), tint, 20)
+
+	# Jump-ins steal the beat: slam the announcement in before anything else.
+	if event.get("jump_in", false):
+		_game._play_cue("jump_in")
+		_game.hud.announce("JUMP IN!", ThemeFactory.ACCENT)
+		_game.effects.impact_ring(_game._discard_position(), tint)
+		_game.effects.shake(7.0)
 
 	# Action cards get their own flourish.
 	match card.value:
@@ -180,6 +198,7 @@ func _on_event_card_played(event: Dictionary) -> void:
 			_game._play_cue("reverse")
 			_game.effects.impact_ring(_game._discard_position(), tint)
 		CardTypes.CardValue.DRAW_TWO:
+			_game._play_cue("draw_penalty", 1.35)
 			_game.effects.shake(6.0)
 		CardTypes.CardValue.WILD, CardTypes.CardValue.WILD_DRAW_FOUR:
 			_game._play_cue("wild")
@@ -238,8 +257,9 @@ func _spawn_drawn(player: int, cards: Array, cue: String) -> void:
 		var slot = _game._fan_slot(player, index)
 		view.set_card_scale(slot["scale"])
 		view.deal_from(_game._deck_position(), slot["position"], slot["rotation"], slot["z"], delay)
-		var timer = _game.get_tree().create_timer(delay)
-		timer.connect("timeout", _game, "_play_cue", [cue])
+		# A rising pitch across a multi-card draw sells the "and another one".
+		var timer = _game.get_tree().create_timer(delay, false)
+		timer.connect("timeout", _game, "_play_cue", [cue, 1.0 + i * 0.06])
 
 
 func _on_event_color_chosen(event: Dictionary) -> void:
@@ -255,7 +275,7 @@ func _on_event_color_required(event: Dictionary) -> void:
 	if event["player"] == 0:
 		_game._pending_wild_card = event["card"]
 		# Wait for the card to land before covering the screen.
-		var timer = _game.get_tree().create_timer(_game.settings.anim_scale(0.34))
+		var timer = _game.get_tree().create_timer(_game.settings.anim_scale(0.34), false)
 		timer.connect("timeout", self, "_open_color_picker")
 	# AI colour choices are resolved inline by _run_ai_turn.
 
@@ -284,6 +304,7 @@ func on_color_selected(color: int) -> void:
 func _on_event_turn_changed(_event: Dictionary) -> void:
 	_game._selected_index = 0
 	_game.hud.set_direction(_game.rules.direction)
+	_game.pulse_turn_ring()
 
 
 func _on_event_reversed(event: Dictionary) -> void:
@@ -370,10 +391,22 @@ func _on_event_round_ended(event: Dictionary) -> void:
 	_game._game_active = false
 	var won = event["winner"] == 0
 	_game.settings.stat_cards_played += _game.rules.stats_cards_played[0]
+	_game.settings.stat_rounds_played += 1
 	if won:
 		_game.settings.stat_rounds_won += 1
 		_game.settings.stat_best_score = int(max(_game.settings.stat_best_score, event["points"]))
 	_game.settings.save_settings()
+
+	# The winning card takes a bow on top of the pile.
+	var winning_view = null
+	for i in range(_game._discard_views.size() - 1, -1, -1):
+		var candidate = _game._discard_views[i]
+		if is_instance_valid(candidate):
+			winning_view = candidate
+			break
+	if winning_view != null:
+		winning_view.celebrate()
+		_game.effects.sparkle(_game._discard_position(), ThemeFactory.ACCENT, 34)
 
 	if won:
 		_game._play_cue("win")
@@ -386,7 +419,7 @@ func _on_event_round_ended(event: Dictionary) -> void:
 	_game.audio.duck_music(1.4)
 
 	# Let the winning animation breathe before the summary panel appears.
-	var timer = _game.get_tree().create_timer(_game.settings.anim_scale(1.5))
+	var timer = _game.get_tree().create_timer(_game.settings.anim_scale(1.5), false)
 	timer.connect("timeout", self, "_show_round_summary", [event])
 
 
@@ -395,8 +428,12 @@ func _show_round_summary(event: Dictionary) -> void:
 	if not _game.rules.match_active:
 		return
 	var lines = []
+	var breakdown = event.get("breakdown", [])
 	for i in range(_game.rules.player_names.size()):
-		lines.append("%s   %d points" % [_game.rules.player_names[i], event["scores"][i]])
+		var gained = breakdown[i] if i < breakdown.size() else 0
+		# Points banked this round next to the running match total.
+		lines.append("%-9s %+5d   total %d" % [
+			_game.rules.player_names[i], gained, event["scores"][i]])
 	lines.append("")
 	lines.append("First to %d wins the match" % _game.rules.rules.target_score)
 	_game.menus.return_screen = MenuLayer.SCREEN_ROUND
@@ -415,7 +452,7 @@ func _on_event_match_ended(event: Dictionary) -> void:
 	for i in range(_game.rules.player_names.size()):
 		lines.append("%s   %d points" % [_game.rules.player_names[i], event["scores"][i]])
 
-	var timer = _game.get_tree().create_timer(_game.settings.anim_scale(1.7))
+	var timer = _game.get_tree().create_timer(_game.settings.anim_scale(1.7), false)
 	timer.connect("timeout", self, "_present_match_over", [won, lines])
 
 

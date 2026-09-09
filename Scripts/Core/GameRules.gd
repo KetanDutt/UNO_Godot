@@ -281,6 +281,46 @@ func can_draw(player: int) -> bool:
 	return not deck_exhausted()
 
 
+# ---------------------------------------------------------------------------
+# Jump-in (house rule)
+# ---------------------------------------------------------------------------
+# A player holding a card *identical* to the top of the discard (same colour
+# AND same value) may play it immediately, out of turn. Play then resumes from
+# the jumper. Wilds can never be jumped in with - their colour only exists once
+# declared - and a live draw stack or a pending colour choice blocks it so the
+# stack and the declaration stay unambiguous.
+func can_jump_in(player: int, card) -> bool:
+	if not rules.jump_in or not round_active or awaiting_color_choice:
+		return false
+	if pending_draw > 0:
+		return false
+	if player == current_player:
+		return false
+	if player < 0 or player >= hands.size():
+		return false
+	if not hands[player].has(card):
+		return false
+	# Nobody may jump in on the untouched opening card - there is nothing to
+	# react to until the first player has actually played.
+	if deck.discard_count() <= 1:
+		return false
+	var top = top_card()
+	if top == null or card == null or card.is_wild():
+		return false
+	return card.color == top.color and card.value == top.value
+
+
+# Every card the seat could legally jump in with right now.
+func jump_in_cards(player: int) -> Array:
+	var result = []
+	if player < 0 or player >= hands.size():
+		return result
+	for card in hands[player]:
+		if can_jump_in(player, card):
+			result.append(card)
+	return result
+
+
 func can_pass(player: int) -> bool:
 	if not round_active or awaiting_color_choice:
 		return false
@@ -310,9 +350,15 @@ func deck_exhausted() -> bool:
 func play_card(player: int, card, chosen_color: int = -1) -> bool:
 	if not round_active or awaiting_color_choice:
 		return false
+	var jumped_in := false
 	if player != current_player:
-		_emit(Event.INVALID_MOVE, {"player": player, "reason": "not_your_turn"})
-		return false
+		# Out of turn is only legal as a jump-in with an identical card.
+		if not can_jump_in(player, card):
+			_emit(Event.INVALID_MOVE, {"player": player, "reason": "not_your_turn"})
+			return false
+		jumped_in = true
+		# Play resumes from the jumper's seat.
+		current_player = player
 	if not hands[player].has(card):
 		_emit(Event.INVALID_MOVE, {"player": player, "reason": "not_in_hand"})
 		return false
@@ -331,7 +377,8 @@ func play_card(player: int, card, chosen_color: int = -1) -> bool:
 	_emit(Event.CARD_PLAYED, {
 		"player": player,
 		"card": card,
-		"remaining": hands[player].size()
+		"remaining": hands[player].size(),
+		"jump_in": jumped_in
 	})
 
 	if card.is_wild():

@@ -151,6 +151,12 @@ func open(suggested: int = -1) -> void:
 		_buttons[focus_index].grab_focus()
 
 
+# Swap the theme live (the high-contrast toggle), without rebuilding widgets.
+func apply_theme(theme: Theme) -> void:
+	if _root != null:
+		_root.theme = theme
+
+
 func refresh_labels() -> void:
 	for i in range(_buttons.size()):
 		var color = CardTypes.PLAYABLE_COLORS[i]

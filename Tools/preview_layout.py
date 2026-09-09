@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -43,6 +44,18 @@ def load_font(size: int, weight: str = "Medium"):
         return ImageFont.truetype(path, size)
     except OSError:
         return ImageFont.load_default()
+
+
+def avatar_image(path: str, cache: dict) -> Image.Image | None:
+    """Load a seat avatar by resource path (cached)."""
+    if path in cache:
+        return cache[path]
+    image = None
+    fs_path = os.path.normpath(os.path.join(REPO, path.replace("res://", "")))
+    if os.path.exists(fs_path):
+        image = Image.open(fs_path).convert("RGBA")
+    cache[path] = image
+    return image
 
 
 def card_image(key: str, cache: dict) -> Image.Image | None:
@@ -131,12 +144,48 @@ def main() -> int:
     def panel(box, radius=14, fill=(12, 15, 23, 200), outline=(255, 255, 255, 32)):
         draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=2)
 
+    # Turn-direction ring around the discard pile (arc + arrowhead, static
+    # pose of the in-game spin).
+    ring = hud.get("ring", None)
+    if ring:
+        cx, cy = vec(ring["position"])
+        radius = float(ring["radius"])
+        tint = ring.get("color", [1.0, 1.0, 1.0])
+        color = tuple(int(255 * c) for c in tint) + (150,)
+        span = 300
+        start = 20
+        draw.arc([cx - radius, cy - radius, cx + radius, cy + radius],
+                 start, start + span, fill=color, width=max(2, int(radius * 0.03)))
+        end_angle = math.radians(start + span)
+        tip = (cx + radius * math.cos(end_angle), cy + radius * math.sin(end_angle))
+        tangent = (-math.sin(end_angle), math.cos(end_angle))
+        if ring.get("direction", 1) < 0:
+            tangent = (-tangent[0], -tangent[1])
+        head = radius * 0.22
+        half = radius * 0.11
+        normal = (math.cos(end_angle), math.sin(end_angle))
+        arrow = [
+            (tip[0] + tangent[0] * head, tip[1] + tangent[1] * head),
+            (tip[0] + normal[0] * half, tip[1] + normal[1] * half),
+            (tip[0] - normal[0] * half, tip[1] - normal[1] * half),
+        ]
+        draw.polygon(arrow, fill=color[:3] + (220,))
+
     # Seat plates.
     for seat in hud.get("seats", []):
         x, y = vec(seat["position"])
         w, h = vec(seat["size"])
         panel([x, y, x + w, y + h])
-        draw.text((x + w / 2, y + h / 2), seat.get("text", ""),
+        avatar = seat.get("avatar", "")
+        text_x = x + w / 2
+        if avatar:
+            image = avatar_image(avatar, cache)
+            if image is not None:
+                size = int(h - 8)
+                icon = image.resize((size, size), Image.LANCZOS)
+                canvas.alpha_composite(icon, (int(x + 7), int(y + (h - size) / 2)))
+                text_x = x + 7 + size + (w - 7 - size) / 2
+        draw.text((text_x, y + h / 2), seat.get("text", ""),
                   font=font_bold, fill=(240, 244, 252), anchor="mm")
 
     # Buttons.

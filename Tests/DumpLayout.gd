@@ -152,12 +152,24 @@ func _dump() -> void:
 	hud_info["direction"] = _game.hud._direction_icon.text
 	var seats = []
 	for plate in _game.hud._seat_plates:
+		var avatar_path = ""
+		if plate["avatar"] != null and plate["avatar"].texture != null:
+			avatar_path = plate["avatar"].texture.resource_path
 		seats.append({
 			"text": plate["label"].text,
 			"position": _v(plate["panel"].rect_position),
-			"size": _v(plate["panel"].rect_size)
+			"size": _v(plate["panel"].rect_size),
+			"avatar": avatar_path
 		})
 	hud_info["seats"] = seats
+	if _game._turn_ring != null:
+		var tint = CardTypes.color_value(_game.rules.active_color)
+		hud_info["ring"] = {
+			"position": _v(_game._turn_ring.position),
+			"radius": _game._turn_ring.radius,
+			"direction": _game._turn_ring.direction,
+			"color": [tint.r, tint.g, tint.b]
+		}
 	data["card_scale"] = TableLayout.player_card_scale(_game._viewport_size())
 	data["table_variant"] = _game.settings.table_variant
 

@@ -37,6 +37,7 @@ func _init() -> void:
 	test_fan_fits_budget()
 	test_seat_plates_visible()
 	test_deck_and_discard_separated()
+	test_turn_ring()
 	test_scaling_monotonic()
 	test_fonts_have_glyphs()
 	test_hud_text_fits()
@@ -344,6 +345,32 @@ func test_deck_and_discard_separated() -> void:
 			"%dx%d: discard pile overlaps the opponent's hand" % [viewport.x, viewport.y])
 		_check(not _overlaps(player_bounds, opponent_bounds),
 			"%dx%d: the two hands overlap" % [viewport.x, viewport.y])
+
+
+# The turn-direction ring circles the discard pile: it must clear the pile's
+# most tilted card, stay inside the viewport, and may only slide UNDER the deck
+# (it paints in a lower z band), never past the deck's centre.
+func test_turn_ring() -> void:
+	print("-- turn ring clears the table furniture --")
+	for viewport in RESOLUTIONS:
+		var s = TableLayout.scale_factor(viewport)
+		var radius = TableLayout.turn_ring_radius(viewport)
+		var pile_half = TableLayout.rotated_half_height(
+			TableLayout.player_card_scale(viewport))
+		_check(radius >= pile_half,
+			"%dx%d: ring does not clear the pile's tilted cards" % [viewport.x, viewport.y])
+		_check(radius < viewport.y * 0.45,
+			"%dx%d: ring is too tall for the viewport" % [viewport.x, viewport.y])
+		var center = TableLayout.discard_position(viewport)
+		_check(center.y - radius >= 0.0 and center.y + radius <= viewport.y,
+			"%dx%d: ring escapes the viewport vertically" % [viewport.x, viewport.y])
+		var deck = TableLayout.deck_position(viewport)
+		var card_half_w = TableLayout.card_size(TableLayout.player_card_scale(viewport)).x * 0.5
+		_check(radius < center.distance_to(deck) + card_half_w,
+			"%dx%d: ring misses the deck zone entirely (arrow would read wrong)" % [
+				viewport.x, viewport.y])
+		_check(radius - card_half_w < center.distance_to(deck),
+			"%dx%d: ring pokes past the deck's centre" % [viewport.x, viewport.y])
 
 
 func test_scaling_monotonic() -> void:

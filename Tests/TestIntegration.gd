@@ -11,6 +11,8 @@ extends SceneTree
 # This complements Tests/TestRules.gd, which covers the pure rules layer.
 
 const CardTypes = preload("res://Scripts/Core/CardTypes.gd")
+const CardData = preload("res://Scripts/Core/CardData.gd")
+const PlayerIdentity = preload("res://Scripts/Core/PlayerIdentity.gd")
 const MenuLayer = preload("res://Scripts/UI/MenuLayer.gd")
 
 var _passed := 0
@@ -56,6 +58,8 @@ func _run_suite() -> void:
 	yield(_test_resize(), "completed")
 	yield(_test_multiplayer_seats(), "completed")
 	yield(_test_house_rules(), "completed")
+	yield(_test_jump_in_and_catch(), "completed")
+	yield(_test_opponents_and_remote(), "completed")
 	_finish()
 
 
@@ -132,7 +136,7 @@ func _test_settings_toggles() -> void:
 	_check(settings.opponent_count >= 1 and settings.opponent_count <= 3, "opponent count in range")
 	_check(settings.table_variant >= 0 and settings.table_variant <= 4, "table variant in range")
 
-	for key in ["stacking", "draw_until", "seven_zero", "force_play"]:
+	for key in ["stacking", "draw_until", "seven_zero", "force_play", "jump_in"]:
 		_game.menus._on_toggle_rule(key)
 	for key in ["hints", "glyphs", "shake", "particles", "contrast"]:
 		_game.menus._on_toggle_display(key)
@@ -194,6 +198,7 @@ func _test_match_flow() -> void:
 			str(r.can_draw(1)), str(r.can_pass(1)), r.playable_cards(1).size()])
 	_check(guard < 400, "round finished in %d steps" % guard)
 	_check(not _game.rules.round_active, "round closed cleanly")
+	_check(_game.settings.stat_rounds_played >= 1, "rounds-played stat tracked")
 
 	# Card conservation across the whole presentation layer.
 	var total = _game.rules.deck.draw_count() + _game.rules.deck.discard_count()
@@ -345,6 +350,262 @@ func _test_house_rules() -> void:
 	_game._show_main_menu()
 	yield(_wait(3), "completed")
 	_check(_game._views.size() == 0, "table cleared on exit to menu")
+
+
+func _test_jump_in_and_catch() -> void:
+	print("\n-- jump-in and the catch window --")
+	_game.settings.opponent_count = 2
+	_game.settings.difficulty = 2        # Hard: always catches, always jumps in
+	_game.settings.rule_jump_in = true
+	# Keep the other house rules out of the way: seven-zero would rewrite the
+	# staged hands and stacking changes what a staged play resolves into.
+	_game.settings.rule_stacking = false
+	_game.settings.rule_draw_until_playable = false
+	_game.settings.rule_seven_zero = false
+	_game.settings.rule_force_play = false
+	_game.settings.animation_speed = 2.0
+	_game.settings.save_settings()
+
+	_game._on_restart_game()
+	yield(_advance(2.5), "completed")
+	var rules = _game.rules
+	_check(rules.rules.jump_in, "jump-in rule applied to the match")
+	_check(rules.player_count() == 3, "three seats at the table")
+
+	# --- The human jumps in out of turn -------------------------------------
+	# Seat 1 plays onto the opening card (so the pile has a real play on top
+	# and the turn belongs to seat 2), then the human drops an exact twin.
+	# Nothing is scheduled between the staged steps, so the flow is
+	# deterministic despite the AI timers elsewhere in the suite.
+	rules.current_player = 1
+	rules.has_drawn_this_turn = false
+	rules.consume_events()
+	# A number card only: an action card would skip/stack/reverse and rewrite
+	# the turn order the test is about to assert on.
+	var ai_card = null
+	for card in rules.hands[1]:
+		if card.is_number():
+			rules.active_color = card.color
+			ai_card = card
+			break
+	_check(ai_card != null, "staged a play for seat 1")
+	# Strip every *other* copy so nobody can jump in on this play; keep the
+	# chosen instance, which is the card about to be played.
+	_strip_exact_copies(rules.hands[2], ai_card)
+	for i in range(rules.hands[1].size() - 1, -1, -1):
+		var other = rules.hands[1][i]
+		if other != ai_card and other.color == ai_card.color and other.value == ai_card.value:
+			rules.hands[1].remove(i)
+	rules.play_card(1, ai_card)
+	_game._process_events(rules.consume_events())
+	_check(rules.current_player == 2, "turn moved to seat 2")
+
+	var twin = CardData.new(ai_card.color, ai_card.value, 8888)
+	rules.hands[0].append(twin)
+	var twin_view = _game._spawn_view(twin, false)
+	_game._refresh_all()
+	_check(is_instance_valid(twin_view) and twin_view.interactive,
+		"twin card is interactive out of turn")
+	_check(twin_view.playable, "twin card is highlighted as playable")
+
+	_game._try_play(twin_view)
+	_check(rules.top_card() != null and rules.top_card().uid == 8888,
+		"human jumped in with the twin")
+	_check(not rules.hands[0].has(twin), "jump-in card left the human's hand")
+	_check(rules.current_player == 1, "play resumed from the seat after the jumper")
+
+	# --- An AI jumps in on the human's play ---------------------------------
+	# Retire the think timer the jump-in dispatch just scheduled, then have
+	# the human play a card that seat 2 holds an exact twin of.
+	_game._ai_turn_token += 1
+	var lead = null
+	for card in rules.hands[0]:
+		if card.is_number():
+			rules.active_color = card.color
+			lead = card
+			break
+	if lead != null:
+		_strip_exact_copies(rules.hands[1], lead)
+		_strip_exact_copies(rules.hands[2], lead)
+		var reply = CardData.new(lead.color, lead.value, 7777)
+		rules.hands[2].append(reply)
+		rules.current_player = 0
+		rules.has_drawn_this_turn = false
+		rules.consume_events()
+		rules.play_card(0, lead)
+		_game._process_events(rules.consume_events())
+		# Seat 2's jump-in fires on its reaction delay.
+		yield(_advance(1.4), "completed")
+		_check(rules.top_card() != null and rules.top_card().uid == 7777,
+			"AI jumped in with an exact twin of the human's card")
+
+	# --- The UNO button and the AI catch window ------------------------------
+	# Stage the human silently on one card; the HUD must offer the late call,
+	# and the hard opponent must catch them once the window elapses.
+	_game._on_restart_game()
+	yield(_advance(2.5), "completed")
+	rules = _game.rules
+	while rules.hands[0].size() > 1:
+		rules.hands[0].pop_back()
+	rules.uno_vulnerable[0] = true
+	rules.consume_events()
+	_game._refresh_all()
+	yield(_wait(2), "completed")
+	_check(not _game.hud._uno_button.disabled, "UNO button enabled while vulnerable")
+
+	yield(_advance(1.5), "completed")
+	_check(not rules.uno_vulnerable[0], "the opponent caught the missed UNO call")
+	_check(rules.hands[0].size() == 3, "catch penalty drew two cards")
+
+	# Leave the settings clean for any run that follows.
+	_game.settings.rule_jump_in = false
+	_game.settings.difficulty = 1
+	_game.settings.save_settings()
+	_game._on_restart_game()
+	yield(_advance(1.5), "completed")
+
+
+# Named, avatar'd opponents; a uniform discard pile; the turn ring; and the
+# D-pad-only action model that carries the game on a TV remote.
+func _test_opponents_and_remote() -> void:
+	print("\n-- opponents, the pile and the remote --")
+	_game.settings.opponent_count = 2
+	_game.settings.rule_jump_in = false
+	_game.settings.animation_speed = 2.0
+	_game.settings.save_settings()
+
+	_game._on_restart_game()
+	yield(_advance(2.5), "completed")
+	var rules = _game.rules
+
+	# --- Opponent identities -------------------------------------------------
+	_check(rules.player_names[0] == "You", "the human seat is still You")
+	var all_named = true
+	var unique = true
+	var seen = {}
+	for i in range(1, rules.player_count()):
+		var name = rules.player_names[i]
+		if not PlayerIdentity.NAMES.has(name):
+			all_named = false
+		if seen.has(name):
+			unique = false
+		seen[name] = true
+	_check(all_named, "CPU seats drew names from the roster")
+	_check(unique, "no two seats share a name")
+	for i in range(rules.player_count()):
+		_check(_game.hud.seat_avatar_texture(i) != null,
+			"seat %d shows an avatar" % i)
+
+	# --- The discard pile is one size, hand-stacked --------------------------
+	# Stage two deterministic plays (the jump-in group's recipe: retire the
+	# pending think timer, then play a number card from an AI hand) so the
+	# pile holds real played cards from *opponent* hands - the ones that used
+	# to land at the wrong scale. An opponent's card renders at 70% in the
+	# hand; on the pile it must match the human's cards exactly.
+	_game._ai_turn_token += 1
+	var staged_seat = 1
+	while staged_seat <= 2 and _game._discard_views.size() < 3:
+		rules.current_player = staged_seat
+		rules.has_drawn_this_turn = false
+		rules.consume_events()
+		var play = null
+		for card in rules.hands[staged_seat]:
+			if card.is_number() and card.color == rules.active_color:
+				play = card
+				break
+		if play == null:
+			for card in rules.hands[staged_seat]:
+				if card.is_number():
+					rules.active_color = card.color
+					play = card
+					break
+		if play == null:
+			break
+		_strip_exact_copies(rules.hands[0], play)
+		if staged_seat == 1:
+			_strip_exact_copies(rules.hands[2], play)
+		rules.play_card(staged_seat, play)
+		_game._process_events(rules.consume_events())
+		yield(_advance(0.5), "completed")
+		staged_seat += 1
+
+	# Let the last throw land before measuring: a card in transit is still
+	# scaling and rotating towards its rest pose.
+	var views = _game._discard_views
+	for _s in range(60):
+		var any_flying = false
+		for view in views:
+			if is_instance_valid(view) and view.is_in_flight():
+				any_flying = true
+				break
+		if not any_flying:
+			break
+		yield(_advance(0.05), "completed")
+
+	_check(views.size() >= 3, "the pile holds several discards (%d)" % views.size())
+	var uniform_scale = true
+	var rotations_vary = false
+	for i in range(views.size()):
+		if not is_instance_valid(views[i]):
+			continue
+		if abs(views[i].scale.x - views[0].scale.x) > 0.001 \
+				or abs(views[i].scale.y - views[0].scale.y) > 0.001:
+			uniform_scale = false
+		if abs(views[i].rotation_degrees - views[0].rotation_degrees) > 0.5:
+			rotations_vary = true
+	_check(uniform_scale, "every resting discard renders at the same scale")
+	_check(rotations_vary, "pile cards carry varied rotation")
+
+	# --- The turn ring --------------------------------------------------------
+	_check(_game._turn_ring != null and _game._turn_ring.visible,
+		"the turn ring is on the table")
+	_check(_game._turn_ring.direction == rules.direction,
+		"the ring spins the way the turn passes")
+
+	# --- Remote model: D-pad only ---------------------------------------------
+	var router = _game.input_router
+	_check(router != null, "the input router exists")
+	_check(router.zone() == 0, "the selection starts on the hand")
+	router.enter_button_zone()
+	_check(router.zone() == 1, "up/down reaches the action buttons")
+	var first_index = router.button_index()
+	router._cycle_buttons(1)
+	_check(router.button_index() != first_index, "down cycles the buttons")
+	router._cycle_buttons(-1)
+	_check(router.button_index() == first_index, "up cycles back")
+	router._cycle_buttons(-1)
+	_check(router.zone() == 0, "up from the top button returns to the hand")
+
+	# Activating DRAW through the remote path draws a card.
+	rules.current_player = 0
+	rules.has_drawn_this_turn = false
+	rules.consume_events()
+	var hand_before = rules.hands[0].size()
+	_game._ai_turn_token += 1
+	_game._begin_turn()
+	yield(_wait(), "completed")
+	router.enter_button_zone()
+	_check(router.button_index() == 0, "the selection lands on DRAW when stuck")
+	var draw_ok = router.button_index() == 0
+	if draw_ok:
+		router._activate_focused_button()
+		yield(_wait(), "completed")
+		_check(rules.hands[0].size() == hand_before + 1,
+			"Enter on the focused DRAW button draws a card")
+
+	# Leave the tree clean for anything that follows.
+	_game.input_router.reset_to_hand()
+	_game.settings.opponent_count = 1
+	_game.settings.save_settings()
+	_game._on_restart_game()
+	yield(_advance(1.5), "completed")
+
+
+# Remove every card identical to `card` from a hand (test staging aid).
+func _strip_exact_copies(hand: Array, card) -> void:
+	for i in range(hand.size() - 1, -1, -1):
+		if hand[i].color == card.color and hand[i].value == card.value:
+			hand.remove(i)
 
 
 func get_tree_paused() -> bool:

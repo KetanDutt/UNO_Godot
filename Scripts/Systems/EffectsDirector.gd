@@ -14,9 +14,13 @@ extends Node2D
 #     the DrawOrder.EFFECTS band, but below the HUD's CanvasLayer.
 
 const DrawOrder = preload("res://Scripts/UI/DrawOrder.gd")
+const ThemeFactory = preload("res://Scripts/Systems/ThemeFactory.gd")
 
 const POOL_SIZE = 10
 const FLOAT_TEXT_POOL = 8
+
+# Corner darkening of the whole table, as a fraction of full-strength black.
+const VIGNETTE_STRENGTH := 0.30
 
 var settings = null
 var _camera_target: Node = null
@@ -27,12 +31,16 @@ var _particle_index: int = 0
 var _float_labels: Array = []
 var _float_index: int = 0
 
+# Fonts for floating text, cached by pixel size - float_text() used to build a
+# fresh DynamicFont (with filtering) on every call.
+var _float_fonts: Dictionary = {}
+
 var _shake_amount: float = 0.0
 var _shake_decay: float = 6.0
 var _shake_offset: Vector2 = Vector2.ZERO
 
 var _flash_rect: ColorRect = null
-var _vignette: ColorRect = null
+var _vignette: TextureRect = null
 
 
 func _ready() -> void:
@@ -224,13 +232,18 @@ func _apply_fade_ramp(emitter: CPUParticles2D, color: Color) -> void:
 	emitter.color_ramp = ramp
 
 
+func _float_font(size: int):
+	if not _float_fonts.has(size):
+		_float_fonts[size] = ThemeFactory.make_font(size, "black", 4)
+	return _float_fonts[size]
+
+
 # ---------------------------------------------------------------------------
 # Floating combat text
 # ---------------------------------------------------------------------------
 func float_text(text: String, position: Vector2, color: Color, size: int = 30, rise: float = 74.0) -> void:
 	var label = _next_label()
-	var font = load("res://Scripts/Systems/ThemeFactory.gd").make_font(size, "black", 4)
-	label.add_font_override("font", font)
+	label.add_font_override("font", _float_font(size))
 	label.add_color_override("font_color", color)
 	label.text = text
 	label.visible = true
@@ -272,8 +285,15 @@ func _process(delta: float) -> void:
 			_shake_offset = Vector2.ZERO
 			_apply_shake_offset(Vector2.ZERO)
 		return
-	_shake_amount = max(0.0, _shake_amount - _shake_decay * delta * 60.0 * delta)
-	_shake_amount = lerp(_shake_amount, 0.0, clamp(delta * _shake_decay, 0.0, 1.0))
+	# Frame-rate independent exponential decay: the shake loses a fixed
+	# fraction of its energy per unit time, so the feel matches at 30, 60 or
+	# 144 fps.
+	_shake_amount *= pow(0.5, delta * _shake_decay)
+	if _shake_amount <= 0.01:
+		_shake_amount = 0.0
+		_shake_offset = Vector2.ZERO
+		_apply_shake_offset(Vector2.ZERO)
+		return
 	var offset = Vector2(
 		rand_range(-_shake_amount, _shake_amount),
 		rand_range(-_shake_amount, _shake_amount)
@@ -295,6 +315,19 @@ func _apply_shake_offset(offset: Vector2) -> void:
 # Full-screen flash / vignette
 # ---------------------------------------------------------------------------
 func attach_overlays(parent: CanvasItem) -> void:
+	# A soft static vignette grounds the table: the edges of the screen fall
+	# into shadow, pulling the eye toward the felt. Pure polish - it can never
+	# block input or react to anything.
+	_vignette = TextureRect.new()
+	_vignette.name = "Vignette"
+	_vignette.texture = _make_vignette_texture()
+	_vignette.anchor_right = 1.0
+	_vignette.anchor_bottom = 1.0
+	_vignette.expand = true
+	_vignette.stretch_mode = TextureRect.STRETCH_SCALE
+	_vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(_vignette)
+
 	_flash_rect = ColorRect.new()
 	_flash_rect.name = "FlashOverlay"
 	_flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -302,6 +335,24 @@ func attach_overlays(parent: CanvasItem) -> void:
 	_flash_rect.anchor_bottom = 1.0
 	_flash_rect.color = Color(1, 1, 1, 0)
 	parent.add_child(_flash_rect)
+
+
+# Small radial gradient: transparent centre, gently darkened corners.
+func _make_vignette_texture() -> ImageTexture:
+	var size = 128
+	var image = Image.new()
+	image.create(size, size, false, Image.FORMAT_RGBA8)
+	image.lock()
+	var center = Vector2(size * 0.5, size * 0.5)
+	for y in range(size):
+		for x in range(size):
+			var d = (Vector2(x, y) - center).length() / (size * 0.5)
+			var edge = clamp((d - 0.55) / 0.6, 0.0, 1.0)
+			image.set_pixel(x, y, Color(0, 0, 0, pow(edge, 1.7) * VIGNETTE_STRENGTH))
+	image.unlock()
+	var texture = ImageTexture.new()
+	texture.create_from_image(image, 0)
+	return texture
 
 
 func flash(color: Color, strength: float = 0.4, duration: float = 0.35) -> void:
