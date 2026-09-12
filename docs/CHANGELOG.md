@@ -4,6 +4,33 @@ All notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 version lives in `project.godot` (`application/config/version`).
 
+## [1.2.1] — 2026-09-12
+
+### Fixed
+
+- **The centre turn-direction ring kept pointing the old way after a
+  Reverse:** the spin rate flipped, but the arc always swept clockwise and
+  its arrowhead never mirrored. The arc and arrow now flip with the rules
+  direction (and repaint immediately), so the head always leads the sweep.
+- **Cards on the centre pile could stay greyed:** a human card that wore the
+  illegal-card dim tint in your fan (always, with playable hints turned off)
+  kept that tint after it was played onto the pile. Leaving the hand now
+  restores a card's full colour, and the red rejection flash returns a dim
+  illegal card to its tint instead of leaving it bright.
+- **D-pad-only play reached everything on your turn but not between turns:**
+  while an opponent was thinking the remote could not open the pause menu,
+  reach a late UNO call, or punish a missed call with CATCH. D-pad navigation
+  and the action buttons now stay live throughout the round (each action
+  still self-checks legality), and the selection jumps straight to CATCH the
+  moment a catch window opens.
+- **TV remotes presenting a D-pad hat (buttons, not an analogue stick)** had
+  no bindings: `ui_up/down/left/right` now map the hat buttons alongside the
+  arrows and stick, Start joins `ui_cancel`, and the pause layer answers Back
+  itself (the game's input is frozen while paused).
+- Scrolling the How-to-Play and Settings screens with a D-pad now pages the
+  panel when focus runs out of neighbours, and focus movement keeps the
+  active row scrolled into view.
+
 ## [1.2.0] — 2026-09-08
 
 ### Added

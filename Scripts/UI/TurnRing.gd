@@ -42,9 +42,14 @@ func configure(settings) -> void:
 
 # Feed it the rules state every refresh. Cheap enough to call per event batch.
 func set_direction(value: int) -> void:
-	var flipped = value != direction and value != 0 and direction != 0
-	direction = 1 if value >= 0 else -1
+	var new_direction = 1 if value >= 0 else -1
+	var flipped = new_direction != direction and value != 0 and direction != 0
+	direction = new_direction
 	if flipped:
+		# The arrowhead and the arc sweep live in _draw, so they must be
+		# repainted - reversing only the spin rate would leave the arrow
+		# pointing the way play used to flow.
+		update()
 		pulse()
 
 
@@ -79,16 +84,23 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
-	draw_arc(Vector2.ZERO, radius, 0.0, ARC_SPAN, ARC_POINTS, ring_color, line_width, true)
-	# Arrowhead at the end of the arc, tangent to the circle.
-	var tip_angle = ARC_SPAN
+	# The arc sweeps in the direction of play: a positive angle turns
+	# clockwise on screen (Godot's y points down), a negative one turns
+	# counter-clockwise. The arrowhead rides the arc's leading end, tangent
+	# to the circle, so reversing play flips both the sweep and the head.
+	var end_angle = ARC_SPAN * direction
+	draw_arc(Vector2.ZERO, radius, 0.0, end_angle, ARC_POINTS, ring_color, line_width, true)
+	# Arrowhead at the leading end of the arc, pointing along the sweep.
+	var tip_angle = end_angle
 	var tip = Vector2(cos(tip_angle), sin(tip_angle)) * radius
-	var tangent = Vector2(-sin(tip_angle), cos(tip_angle))
+	# Tangent that points along increasing angle, flipped for the reverse
+	# sweep so the head always leads the rotation of the node.
+	var along = Vector2(-sin(tip_angle), cos(tip_angle)) * direction
 	var head_length = radius * 0.22
 	var head_half = radius * 0.11
 	var normal = Vector2(cos(tip_angle), sin(tip_angle))
 	var points = PoolVector2Array([
-		tip + tangent * head_length,
+		tip + along * head_length,
 		tip + normal * head_half,
 		tip - normal * head_half
 	])

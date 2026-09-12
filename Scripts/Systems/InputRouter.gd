@@ -65,7 +65,11 @@ func handle(event) -> bool:
 
 	if _game.menus.is_open() or _game.color_picker.is_open():
 		return false
-	if not _game._can_interact():
+	# Navigation stays open throughout the round, including while an opponent
+	# is thinking: a D-pad player must still be able to pause (MENU), sort,
+	# call a late UNO or slap CATCH within the reaction window. Each action
+	# handler re-checks its own legality and simply no-ops when unavailable.
+	if not _game._remote_navigation_allowed():
 		return false
 
 	if _is_left(event):
@@ -90,7 +94,10 @@ func handle(event) -> bool:
 			_cycle_buttons(1)
 	elif _is_accept(event):
 		if _ui_zone == UiZone.ZONE_HAND:
-			_game._play_selected()
+			# Playing a card is only legal on your turn or for a jump-in;
+			# pressing Enter on your cards at any other time does nothing.
+			if _game._can_interact():
+				_game._play_selected()
 		else:
 			_activate_focused_button()
 	elif _is_key(event, KEY_D) or _is_pad(event, JOY_XBOX_X):
@@ -121,11 +128,21 @@ func enter_button_zone() -> void:
 	var count = _game.hud.get_buttons().size()
 	for i in range(count):
 		if _game.hud.is_button_selectable(i):
-			_ui_zone = UiZone.ZONE_BUTTONS
-			_button_index = i
-			_game._play_cue("select", 1.0 + i * 0.02)
-			_game.hud.set_button_selection(i)
+			focus_button(i)
 			return
+
+
+# Jump the remote selection straight onto a specific action button. Used
+# when a time-critical action appears (the CATCH window): the D-pad player
+# lands on the one button that matters instead of hunting for it.
+func focus_button(index: int) -> void:
+	if not _game.hud.is_button_selectable(index):
+		apply_button_selection()
+		return
+	_ui_zone = UiZone.ZONE_BUTTONS
+	_button_index = index
+	_game._play_cue("select", 1.0 + index * 0.02)
+	_game.hud.set_button_selection(index)
 
 
 func _cycle_buttons(direction: int) -> void:

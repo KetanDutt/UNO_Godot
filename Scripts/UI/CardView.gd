@@ -202,10 +202,16 @@ func _anim(duration: float) -> float:
 # State
 # ---------------------------------------------------------------------------
 func set_interactive(value: bool) -> void:
+	var changed = interactive != value
 	interactive = value
 	# Toggling pickability is far cheaper than leaving every card in the physics
 	# broadphase and filtering in the handler.
 	_area.input_pickable = value
+	if changed:
+		# A card leaving the hand (it just landed on the discard pile) must
+		# shed the illegal-card dimming it wore in the fan, otherwise the
+		# cards on the centre pile stay grey while face-down opponents do not.
+		_update_tint()
 	if not value and _is_hovered:
 		_is_hovered = false
 		_return_to_rest()
@@ -535,7 +541,10 @@ func shake_invalid() -> void:
 	# Flash red so the rejection reads even with sound off.
 	var flash = create_tween()
 	flash.tween_property(_sprite, "modulate", Color(1.4, 0.45, 0.45, 1), _anim(0.08))
-	flash.tween_property(_sprite, "modulate", Color(1, 1, 1, 1), _anim(0.22))
+	flash.tween_property(_sprite, "modulate", Color(1, 1, 1, 1), _anim(0.12))
+	# Restore the card's real tint - an illegal fan card must end dimmed
+	# again, not stay bright white after the red wash fades.
+	flash.tween_callback(self, "_update_tint")
 
 
 func _bump() -> void:
