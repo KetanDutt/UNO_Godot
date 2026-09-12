@@ -429,6 +429,10 @@ func _clear_table() -> void:
 	_catch_available = false
 	_catch_target = -1
 	_pending_wild_card = null
+	# A new table always opens with the remote selection back on the hand;
+	# the previous match could have left it on a (now gone) action button.
+	if input_router != null:
+		input_router.reset_to_hand()
 	# Anything scheduled against the old table (catch windows, AI jump-ins)
 	# is dead; a firing timer retires on the token check.
 	if reactions != null:
@@ -669,6 +673,15 @@ func _can_act() -> bool:
 		and not menus.is_open() and not color_picker.is_open()
 
 
+# Wider gate for D-pad *navigation*: unlike acting, moving the selection around
+# is allowed while an opponent is thinking. The action handlers (and the
+# router's play-a-card branch) each re-check legality, so this only opens the
+# menu of reachable actions; it cannot trigger an illegal move.
+func _remote_navigation_allowed() -> bool:
+	return rules != null and rules.round_active \
+		and not menus.is_open() and not color_picker.is_open()
+
+
 # Wider gate used for card interaction: with the jump-in house rule on, an
 # exact twin of the top discard is playable even off-turn - INCLUDING while an
 # opponent is mid-think, because beating them to the click is the whole point
@@ -901,6 +914,7 @@ func _refresh_hud() -> void:
 
 	# Recompute the catch opening from live rules state every refresh so the
 	# CATCH button appears (and disappears) exactly when it is legal.
+	var catch_was_available = _catch_available
 	_evaluate_catch_opportunity()
 
 	var my_turn = rules.current_player == 0 and rules.round_active and not _busy
@@ -917,6 +931,12 @@ func _refresh_hud() -> void:
 		rules.hands[0].size() >= 2,
 		_catch_available
 	)
+
+	# The catch window is short. The moment it opens, land the D-pad remote
+	# selection straight on CATCH so a TV player needs only one press.
+	if _catch_available and not catch_was_available and input_router != null \
+			and not menus.is_open() and not color_picker.is_open():
+		input_router.focus_button(HudLayer.BUTTON_CATCH)
 
 	# Seat plates are placed by TableLayout so they never collide with a fan.
 	var size = _viewport_size()

@@ -65,8 +65,10 @@ const HELP_HOUSE_RULES = \
 	"Jump-in - a card identical to the top of the pile (same colour AND value) may be " + \
 	"played out of turn by anyone, including you. Play then resumes from the jumper."
 const HELP_CONTROLS = \
-	"Remote / gamepad - D-pad moves, Enter or A confirms, Back pauses. In your " + \
-	"hand, Up jumps to the action buttons; Up again returns to your cards.\n" + \
+	"Remote / gamepad - D-pad moves the selection, Enter or A confirms, Back pauses " + \
+	"and goes back. In your hand, Up or Down leaves the cards for the action buttons; " + \
+	"keep pressing Up to return to your cards. When CATCH! appears it is selected for " + \
+	"you automatically. The colour wheel and every menu use the same D-pad controls.\n" + \
 	"Mouse / touch - click or drag a card onto the pile. Hover to preview.\n" + \
 	"Keyboard - Left/Right select, Enter or Space plays, D draws, P passes, U calls " + \
 	"UNO, C catches, S sorts, Esc pauses."
@@ -96,6 +98,9 @@ var _match_title: Label = null
 var _match_body: Label = null
 var _stats_body: Label = null
 
+# ScrollContainers that must respond to the D-pad, keyed by screen id.
+var _screen_scrolls: Dictionary = {}
+
 var _transition_tween = null
 
 
@@ -103,6 +108,9 @@ func _ready() -> void:
 	name = "MenuLayer"
 	layer = 20
 	pause_mode = Node.PAUSE_MODE_PROCESS
+	# The layer answers Back itself while the tree is paused (the
+	# GameController's input is frozen then) and pages scrollable screens.
+	set_process_unhandled_input(true)
 
 
 func build(settings_ref, theme: Theme) -> void:
@@ -134,7 +142,52 @@ func build(settings_ref, theme: Theme) -> void:
 	_build_round_summary(root)
 	_build_match_over(root)
 
+	# Keep focused controls visible inside every scroll area.
+	for screen_id in _screen_scrolls.keys():
+		_bind_focus_follow(_screen_scrolls[screen_id])
+
 	hide_all(true)
+
+
+# Connect every focusable control inside a scroll area so D-pad focus
+# movement scrolls the area to keep it on screen.
+func _bind_focus_follow(scroll: ScrollContainer) -> void:
+	var stack = [scroll]
+	while not stack.empty():
+		var node = stack.pop_back()
+		if node is Control and node.focus_mode != Control.FOCUS_NONE \
+				and not node.is_connected("focus_entered", self, "_on_scroll_child_focused"):
+			node.connect("focus_entered", self, "_on_scroll_child_focused", [scroll])
+		for child in node.get_children():
+			stack.append(child)
+
+
+func _on_scroll_child_focused(scroll: ScrollContainer) -> void:
+	call_deferred("_reveal_focused", scroll)
+
+
+# Godot 3 ScrollContainers do not reliably pull a newly focused row into view,
+# so scroll just enough to keep the focused control on screen.
+func _reveal_focused(scroll: ScrollContainer) -> void:
+	if not is_instance_valid(scroll) or not scroll.visible:
+		return
+	var focus_owner = get_viewport().gui_get_focus_owner()
+	if focus_owner == null or not is_instance_valid(focus_owner):
+		return
+	var ancestor = focus_owner.get_parent()
+	while ancestor != null and ancestor != scroll:
+		ancestor = ancestor.get_parent()
+	if ancestor != scroll:
+		return
+	var top = focus_owner.global_position.y - scroll.global_position.y + scroll.get_v_scroll()
+	var bottom = top + focus_owner.rect_size.y
+	var v = scroll.get_v_scroll()
+	var view_h = scroll.rect_size.y
+	if top < v:
+		# Range clamps the value to [min, max] itself, no scrollbar lookup.
+		scroll.set_v_scroll(top - 10.0)
+	elif bottom > v + view_h:
+		scroll.set_v_scroll(bottom - view_h + 10.0)
 
 
 # Swap the theme live (the high-contrast toggle), without rebuilding widgets.
@@ -286,6 +339,7 @@ func _build_settings(root: Control) -> void:
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.scroll_horizontal_enabled = false
 	outer.add_child(scroll)
+	_screen_scrolls[SCREEN_SETTINGS] = scroll
 
 	var box = VBoxContainer.new()
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -409,6 +463,7 @@ func _build_help(root: Control) -> void:
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.scroll_horizontal_enabled = false
 	outer.add_child(scroll)
+	_screen_scrolls[SCREEN_HELP] = scroll
 
 	var box = VBoxContainer.new()
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -843,3 +898,48 @@ var return_screen: String = SCREEN_MAIN
 
 func _on_back() -> void:
 	show_screen(return_screen)
+
+
+# ---------------------------------------------------------------------------
+# TV remote / gamepad
+# ---------------------------------------------------------------------------
+func _unhandled_input(event) -> void:
+	if current_screen == SCREEN_NONE:
+		return
+	# While paused the GameController receives no input, so the Back button
+	# has to be answered from here: it closes sub-screens and resumes play.
+	if get_tree().paused and _is_remote_press(event, "ui_cancel"):
+		_handle_remote_back()
+		get_tree().set_input_as_handled()
+		return
+	# D-pad paging of scrollable screens. This only reaches unhandled input
+	# when focus navigation had no further neighbour to jump to, so it never
+	# fights the engine's own D-pad focus movement.
+	var scroll = _screen_scrolls.get(current_screen, null)
+	if scroll != null and scroll.visible:
+		var step = max(72.0, scroll.rect_size.y * 0.8)
+		if _is_remote_press(event, "ui_up"):
+			scroll.set_v_scroll(scroll.get_v_scroll() - step)
+			get_tree().set_input_as_handled()
+		elif _is_remote_press(event, "ui_down"):
+			scroll.set_v_scroll(scroll.get_v_scroll() + step)
+			get_tree().set_input_as_handled()
+
+
+func _handle_remote_back() -> void:
+	match current_screen:
+		SCREEN_SETTINGS, SCREEN_HELP, SCREEN_STATS:
+			show_screen(return_screen)
+		SCREEN_PAUSE:
+			emit_signal("resume_game")
+
+
+# Edge-triggered press from a D-pad: keyboard arrow or a hat button. Held
+# analogue sticks are deliberately excluded - they fire every frame and would
+# page-scroll past the content before it can be read.
+func _is_remote_press(event, action: String) -> bool:
+	if event is InputEventKey:
+		return event.pressed and not event.echo and event.is_action(action)
+	if event is InputEventJoypadButton:
+		return event.pressed and event.is_action(action)
+	return false

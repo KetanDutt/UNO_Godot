@@ -21,6 +21,14 @@ const ThemeFactory = preload("res://Scripts/Systems/ThemeFactory.gd")
 const TableLayout = preload("res://Scripts/UI/TableLayout.gd")
 const DrawOrder = preload("res://Scripts/UI/DrawOrder.gd")
 
+# Indices into get_buttons(), used by the D-pad remote selection model.
+const BUTTON_DRAW = 0
+const BUTTON_PASS = 1
+const BUTTON_UNO = 2
+const BUTTON_CATCH = 3
+const BUTTON_SORT = 4
+const BUTTON_MENU = 5
+
 var settings = null
 
 var _root: Control = null

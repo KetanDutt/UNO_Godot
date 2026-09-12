@@ -14,6 +14,7 @@ const CardTypes = preload("res://Scripts/Core/CardTypes.gd")
 const CardData = preload("res://Scripts/Core/CardData.gd")
 const PlayerIdentity = preload("res://Scripts/Core/PlayerIdentity.gd")
 const MenuLayer = preload("res://Scripts/UI/MenuLayer.gd")
+const HudLayer = preload("res://Scripts/UI/HudLayer.gd")
 
 var _passed := 0
 var _failed := 0
@@ -60,6 +61,7 @@ func _run_suite() -> void:
 	yield(_test_house_rules(), "completed")
 	yield(_test_jump_in_and_catch(), "completed")
 	yield(_test_opponents_and_remote(), "completed")
+	yield(_test_dpad_remote(), "completed")
 	_finish()
 
 
@@ -565,6 +567,10 @@ func _test_opponents_and_remote() -> void:
 	# --- Remote model: D-pad only ---------------------------------------------
 	var router = _game.input_router
 	_check(router != null, "the input router exists")
+	# The staged plays above may have snapped focus onto CATCH (that auto-focus
+	# is verified in its own suite) - assert the selection MODEL, so reset to
+	# the hand first.
+	router.reset_to_hand()
 	_check(router.zone() == 0, "the selection starts on the hand")
 	router.enter_button_zone()
 	_check(router.zone() == 1, "up/down reaches the action buttons")
@@ -596,6 +602,185 @@ func _test_opponents_and_remote() -> void:
 	# Leave the tree clean for anything that follows.
 	_game.input_router.reset_to_hand()
 	_game.settings.opponent_count = 1
+	_game.settings.save_settings()
+	_game._on_restart_game()
+	yield(_advance(1.5), "completed")
+
+
+# End-to-end D-pad-only play: hat-button bindings, the pile tint regression,
+# the centre ring reversing, and every action being reachable while an
+# opponent is thinking (pause and the time-critical CATCH window).
+func _test_dpad_remote() -> void:
+	print("\n-- D-pad-only remote play --")
+
+	# A pure D-pad remote presents a hat, not a stick: all four directions and
+	# Back must answer its buttons in the input map.
+	# Godot 3.5 numbers the D-pad hat JOY_DPAD_UP=12..RIGHT=15 (Godot 4's
+	# SDL-style numbering differs, so bind the constants, not raw indices).
+	var dpad_hats = {"ui_up": JOY_DPAD_UP, "ui_down": JOY_DPAD_DOWN,
+		"ui_left": JOY_DPAD_LEFT, "ui_right": JOY_DPAD_RIGHT}
+	for action in dpad_hats.keys():
+		var bound = false
+		for event in InputMap.get_action_list(action):
+			if event is InputEventJoypadButton and event.button_index == dpad_hats[action]:
+				bound = true
+		_check(bound, "%s answers the D-pad hat button" % action)
+	var start_bound = false
+	for event in InputMap.get_action_list("ui_cancel"):
+		if event is InputEventJoypadButton and event.button_index == JOY_START:
+			start_bound = true
+	_check(start_bound, "ui_cancel answers the Start button")
+
+	# Hints off dims every card in the hand; pile cards must still be full
+	# colour - that was the greyed-pile regression.
+	_game.settings.show_hints = false
+	_game.settings.difficulty = 2
+	_game.settings.opponent_count = 2
+	_game.settings.rule_jump_in = false
+	_game.settings.animation_speed = 2.0
+	_game.settings.save_settings()
+
+	_game._on_restart_game()
+	yield(_advance(2.5), "completed")
+	var rules = _game.rules
+	# Stage the human turn directly: retire any in-flight AI think timer and
+	# dispatch the seat-0 turn the same way the engine would.
+	rules.current_player = 0
+	rules.has_drawn_this_turn = false
+	rules.consume_events()
+	_game._ai_turn_token += 1
+	_game._begin_turn()
+	yield(_wait(), "completed")
+	_check(rules.round_active and rules.current_player == 0, "reached the human turn")
+
+	if rules.round_active and rules.current_player == 0:
+		var legal_cards = rules.playable_cards(0)
+		if legal_cards.size() > 0:
+			# Hat Right moves the hand selection through the router (with a
+			# legal card in hand the turn opens on the hand zone).
+			var before = _game._selected_index
+			var hat_right = InputEventJoypadButton.new()
+			hat_right.button_index = JOY_DPAD_RIGHT
+			hat_right.pressed = true
+			var consumed = _game.input_router.handle(hat_right)
+			var expected = int(posmod(before + 1, rules.hands[0].size()))
+			_check(consumed and _game._selected_index == expected,
+				"D-pad Right cycles the hand selection")
+
+		# With hints off every interactive fan card is dimmed.
+		var dimmed = 0
+		for card in rules.hands[0]:
+			if _game._views.has(card.uid) and _game._views[card.uid]._sprite.modulate.r < 0.8:
+				dimmed += 1
+		_check(dimmed == rules.hands[0].size(),
+			"hints-off cards in the hand are dimmed (%d/%d)" % [dimmed, rules.hands[0].size()])
+
+		# Play a number card and check the copy on the centre pile is bright.
+		var chosen = null
+		for card in legal_cards:
+			if card.is_number():
+				chosen = card
+				break
+		if chosen == null:
+			for card in legal_cards:
+				if not card.is_wild():
+					chosen = card
+					break
+		if chosen != null:
+			var played_uid = chosen.uid
+			_game._try_play(_game._views[played_uid])
+			# A wild opens the mandatory colour picker; resolve it the same
+			# way the other suites do, otherwise the card never lands.
+			if rules.awaiting_color_choice:
+				_game._on_color_selected(CardTypes.CardColor.RED)
+			yield(_advance(0.6), "completed")
+			if rules.awaiting_color_choice:
+				_game._on_color_selected(CardTypes.CardColor.RED)
+				yield(_wait(4), "completed")
+			var pile_view = null
+			for view in _game._discard_views:
+				if is_instance_valid(view) and view.card_data != null \
+						and view.card_data.uid == played_uid:
+					pile_view = view
+			_check(pile_view != null, "the played card reached the centre pile")
+			if pile_view != null:
+				var tint = pile_view._sprite.modulate
+				_check(tint.r >= 0.99 and tint.g >= 0.99 and tint.b >= 0.99,
+					"the played pile card is not greyed out (%.2f %.2f %.2f)" % [
+						tint.r, tint.g, tint.b])
+
+	# Every face-up card anywhere on the pile shows full colour.
+	var pile_bright = true
+	for view in _game._discard_views:
+		if is_instance_valid(view) and view.card_data != null and not view.face_down:
+			var tint = view._sprite.modulate
+			if tint.r < 0.99 or tint.g < 0.99 or tint.b < 0.99:
+				pile_bright = false
+	_check(pile_bright, "every face on the centre pile is full colour")
+
+	# The centre ring's arrow flips with the rules direction.
+	var ring = _game._turn_ring
+	ring.set_direction(-1)
+	_check(ring.direction == -1, "the centre ring reverses counter-clockwise")
+	ring.set_direction(1)
+	_check(ring.direction == 1, "the centre ring restores clockwise")
+
+	# Actions must stay reachable while an opponent is thinking.
+	rules.current_player = 1
+	rules.has_drawn_this_turn = false
+	if rules.awaiting_color_choice:
+		_game._on_color_selected(CardTypes.CardColor.RED)
+	rules.consume_events()
+	_game._ai_turn_token += 1
+	_game._begin_turn()
+	yield(_wait(), "completed")
+	_check(_game._busy, "an opponent turn blocks acting")
+	var router = _game.input_router
+	router.focus_button(HudLayer.BUTTON_MENU)
+	_check(router.zone() == 1 and router.button_index() == HudLayer.BUTTON_MENU,
+		"MENU is reachable on the D-pad while an opponent thinks")
+	router._activate_focused_button()
+	yield(_wait(2), "completed")
+	_check(_game.menus.current_screen == MenuLayer.SCREEN_PAUSE,
+		"activating MENU pauses mid opponent turn")
+
+	# Back while paused must resume - the GameController is frozen, so the
+	# menu layer answers it itself.
+	var back = InputEventJoypadButton.new()
+	back.button_index = JOY_XBOX_B
+	back.pressed = true
+	_game.menus._unhandled_input(back)
+	yield(_wait(3), "completed")
+	_check(not _game.menus.is_open() and not get_tree_paused(),
+		"Back on the pause screen resumes play")
+
+	# A catchable opponent selects CATCH for the remote player automatically.
+	yield(_advance(0.2), "completed")
+	router.reset_to_hand()
+	for i in range(rules.player_count()):
+		rules.uno_vulnerable[i] = false
+	_game._refresh_all()
+	while rules.hands[1].size() > 1:
+		rules.hands[1].pop_back()
+	var caught_before = rules.hands[1].size()
+	rules.uno_vulnerable[1] = true
+	rules.consume_events()
+	_game._refresh_all()
+	_check(router.zone() == 1 and router.button_index() == HudLayer.BUTTON_CATCH,
+		"the selection jumps to CATCH when the window opens")
+	router._activate_focused_button()
+	yield(_wait(2), "completed")
+	_check(not rules.uno_vulnerable[1], "the remote CATCH lands")
+	_check(rules.hands[1].size() == caught_before + 2,
+		"the caught opponent drew two cards")
+	router.reset_to_hand()
+
+	# Leave clean settings for anything that follows.
+	_game.settings.show_hints = true
+	_game.settings.difficulty = 1
+	_game.settings.opponent_count = 1
+	_game.settings.rule_jump_in = false
+	_game.settings.animation_speed = 2.0
 	_game.settings.save_settings()
 	_game._on_restart_game()
 	yield(_advance(1.5), "completed")
