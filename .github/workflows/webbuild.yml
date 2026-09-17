@@ -1,0 +1,115 @@
+name: WebBuild
+
+# Exports the HTML5 build and force-updates the `WebBuild` branch, which
+# GitHub Pages serves (legacy branch deploy, root path). Pushing to the
+# WebBuild branch itself does not re-trigger this workflow.
+
+on:
+  push:
+    branches-ignore: [WebBuild]
+  workflow_dispatch:
+
+concurrency:
+  group: webbuild
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  export-web:
+    name: Export HTML5 and update WebBuild branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-3.5.3-linux-headless
+
+      - name: Download Godot 3.5.3 (headless)
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot
+          curl -fsSL --retry 5 -o /tmp/godot.zip \
+            https://github.com/godotengine/godot/releases/download/3.5.3-stable/Godot_v3.5.3-stable_linux_headless.64.zip
+          unzip -q /tmp/godot.zip -d ~/godot
+          mv ~/godot/Godot_v3.5.3-stable_linux_headless.64 ~/godot/godot
+          chmod +x ~/godot/godot
+
+      - name: Cache export templates
+        id: cache-templates
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/godot/templates
+          key: godot-3.5.3-stable-export-templates
+
+      - name: Download export templates 3.5.3
+        if: steps.cache-templates.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.local/share/godot/templates
+          curl -fsSL --retry 5 -o /tmp/templates.tpz \
+            https://github.com/godotengine/godot/releases/download/3.5.3-stable/Godot_v3.5.3-stable_export_templates.tpz
+          unzip -q /tmp/templates.tpz -d /tmp/templates
+          rm -rf ~/.local/share/godot/templates/3.5.3.stable
+          mv /tmp/templates/templates ~/.local/share/godot/templates/3.5.3.stable
+          rm -rf /tmp/templates /tmp/templates.tpz
+
+      - name: Import assets
+        # First headless run generates .import/; it exits non-zero by design.
+        run: ~/godot/godot --no-window --editor --quit || true
+
+      - name: Export HTML5 (release)
+        run: |
+          mkdir -p build/web
+          ~/godot/godot --no-window --export "HTML5" build/web/index.html
+          ls -la build/web
+
+      - name: Update WebBuild branch
+        run: |
+          # Emit the log tail as an error annotation on failure (annotations
+          # are readable via the API even when step logs are not retained).
+          exec > >(tee /tmp/webbuild-deploy.log) 2>&1
+          on_err() {
+            status=$?
+            msg=$(tail -c 1400 /tmp/webbuild-deploy.log | sed 's/%/%25/g; s/\r//g' | sed ':a;N;$!ba;s/\n/%0A/g' | tail -c 1200)
+            echo "::error::Update WebBuild failed (exit $status): $msg"
+            exit $status
+          }
+          trap on_err ERR
+
+          set -x
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          BASE=""
+          if git fetch --no-tags origin "+refs/heads/WebBuild:refs/remotes/origin/WebBuild"; then
+            BASE=$(git rev-parse --verify origin/WebBuild || true)
+          fi
+
+          # Drop the build output into a worktree of this checkout so the
+          # new commit shares the checkout's object database (its parent
+          # commit) and its persisted push credentials.
+          if [ -n "$BASE" ]; then
+            git worktree add --detach /tmp/deploy "$BASE"
+          else
+            git worktree add --detach /tmp/deploy HEAD
+          fi
+
+          find /tmp/deploy -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -r build/web/. /tmp/deploy/
+          touch /tmp/deploy/.nojekyll
+          git -C /tmp/deploy add -A
+
+          if [ -n "$BASE" ]; then
+            git -C /tmp/deploy commit -m "Web build of ${GITHUB_SHA::7}"
+          else
+            git -C /tmp/deploy checkout --orphan webbuild-new
+            git -C /tmp/deploy commit -m "Web build of ${GITHUB_SHA::7}"
+          fi
+
+          git -C /tmp/deploy push origin HEAD:refs/heads/WebBuild
+          echo "WebBuild updated to $(git -C /tmp/deploy rev-parse HEAD)"
