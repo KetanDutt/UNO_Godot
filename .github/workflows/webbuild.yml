@@ -1,0 +1,95 @@
+name: WebBuild
+
+# Exports the HTML5 build and force-updates the `WebBuild` branch, which
+# GitHub Pages serves (legacy branch deploy, root path). Pushing to the
+# WebBuild branch itself does not re-trigger this workflow.
+
+on:
+  push:
+    branches-ignore: [WebBuild]
+  workflow_dispatch:
+
+concurrency:
+  group: webbuild
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  export-web:
+    name: Export HTML5 and update WebBuild branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-3.5.3-linux-headless
+
+      - name: Download Godot 3.5.3 (headless)
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot
+          curl -fsSL --retry 5 -o /tmp/godot.zip \
+            https://github.com/godotengine/godot/releases/download/3.5.3-stable/Godot_v3.5.3-stable_linux_headless.64.zip
+          unzip -q /tmp/godot.zip -d ~/godot
+          mv ~/godot/Godot_v3.5.3-stable_linux_headless.64 ~/godot/godot
+          chmod +x ~/godot/godot
+
+      - name: Cache export templates
+        id: cache-templates
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/godot/templates
+          key: godot-3.5.3-stable-export-templates
+
+      - name: Download export templates 3.5.3
+        if: steps.cache-templates.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.local/share/godot/templates
+          curl -fsSL --retry 5 -o /tmp/templates.tpz \
+            https://github.com/godotengine/godot/releases/download/3.5.3-stable/Godot_v3.5.3-stable_export_templates.tpz
+          unzip -q /tmp/templates.tpz -d /tmp/templates
+          rm -rf ~/.local/share/godot/templates/3.5.3.stable
+          mv /tmp/templates/templates ~/.local/share/godot/templates/3.5.3.stable
+          rm -rf /tmp/templates /tmp/templates.tpz
+
+      - name: Import assets
+        # First headless run generates .import/; it exits non-zero by design.
+        run: ~/godot/godot --no-window --editor --quit || true
+
+      - name: Export HTML5 (release)
+        run: |
+          mkdir -p build/web
+          ~/godot/godot --no-window --export "HTML5" build/web/index.html
+          ls -la build/web
+
+      - name: Update WebBuild branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Stage the web build output as its own tree.
+          rm -rf /tmp/stage
+          cp -r build/web /tmp/stage
+          touch /tmp/stage/.nojekyll
+          git -C /tmp/stage init -q
+          git -C /tmp/stage add -A
+          TREE=$(git -C /tmp/stage write-tree)
+
+          # Parent the build commit on the current WebBuild tip when it
+          # exists, so the branch moves forward as a fast-forward.
+          if git fetch origin WebBuild 2>/dev/null; then
+            BASE=$(git rev-parse FETCH_HEAD)
+            NEW=$(git commit-tree "$TREE" -p "$BASE" -m "Web build of ${GITHUB_SHA::7}")
+            git push --force-with-lease=refs/heads/WebBuild:"$BASE" origin "$NEW:refs/heads/WebBuild"
+          else
+            NEW=$(git commit-tree "$TREE" -m "Web build of ${GITHUB_SHA::7}")
+            git push origin "$NEW:refs/heads/WebBuild"
+          fi
+
+          echo "Pushed ${NEW} to WebBuild"
