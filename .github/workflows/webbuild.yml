@@ -70,26 +70,46 @@ jobs:
 
       - name: Update WebBuild branch
         run: |
+          # Emit the log tail as an error annotation on failure (annotations
+          # are readable via the API even when step logs are not retained).
+          exec > >(tee /tmp/webbuild-deploy.log) 2>&1
+          on_err() {
+            status=$?
+            msg=$(tail -c 1400 /tmp/webbuild-deploy.log | sed 's/%/%25/g; s/\r//g' | sed ':a;N;$!ba;s/\n/%0A/g' | tail -c 1200)
+            echo "::error::Update WebBuild failed (exit $status): $msg"
+            exit $status
+          }
+          trap on_err ERR
+
+          set -x
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Stage the web build output as its own tree.
-          rm -rf /tmp/stage
-          cp -r build/web /tmp/stage
-          touch /tmp/stage/.nojekyll
-          git -C /tmp/stage init -q
-          git -C /tmp/stage add -A
-          TREE=$(git -C /tmp/stage write-tree)
-
-          # Parent the build commit on the current WebBuild tip when it
-          # exists, so the branch moves forward as a fast-forward.
-          if git fetch origin WebBuild 2>/dev/null; then
-            BASE=$(git rev-parse FETCH_HEAD)
-            NEW=$(git commit-tree "$TREE" -p "$BASE" -m "Web build of ${GITHUB_SHA::7}")
-            git push --force-with-lease=refs/heads/WebBuild:"$BASE" origin "$NEW:refs/heads/WebBuild"
-          else
-            NEW=$(git commit-tree "$TREE" -m "Web build of ${GITHUB_SHA::7}")
-            git push origin "$NEW:refs/heads/WebBuild"
+          BASE=""
+          if git fetch --no-tags origin "+refs/heads/WebBuild:refs/remotes/origin/WebBuild"; then
+            BASE=$(git rev-parse --verify origin/WebBuild || true)
           fi
 
-          echo "Pushed ${NEW} to WebBuild"
+          # Drop the build output into a worktree of this checkout so the
+          # new commit shares the checkout's object database (its parent
+          # commit) and its persisted push credentials.
+          if [ -n "$BASE" ]; then
+            git worktree add --detach /tmp/deploy "$BASE"
+          else
+            git worktree add --detach /tmp/deploy HEAD
+          fi
+
+          find /tmp/deploy -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -r build/web/. /tmp/deploy/
+          touch /tmp/deploy/.nojekyll
+          git -C /tmp/deploy add -A
+
+          if [ -n "$BASE" ]; then
+            git -C /tmp/deploy commit -m "Web build of ${GITHUB_SHA::7}"
+          else
+            git -C /tmp/deploy checkout --orphan webbuild-new
+            git -C /tmp/deploy commit -m "Web build of ${GITHUB_SHA::7}"
+          fi
+
+          git -C /tmp/deploy push origin HEAD:refs/heads/WebBuild
+          echo "WebBuild updated to $(git -C /tmp/deploy rev-parse HEAD)"
