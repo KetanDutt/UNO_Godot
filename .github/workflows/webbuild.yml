@@ -104,6 +104,11 @@ jobs:
           touch /tmp/deploy/.nojekyll
           git -C /tmp/deploy add -A
 
+          if git -C /tmp/deploy diff --cached --quiet; then
+            echo "Build of ${GITHUB_SHA::7} is identical to the deployed WebBuild; nothing to push."
+            exit 0
+          fi
+
           if [ -n "$BASE" ]; then
             git -C /tmp/deploy commit -m "Web build of ${GITHUB_SHA::7}"
           else
